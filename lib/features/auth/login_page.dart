@@ -15,7 +15,6 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final emailCtrl = TextEditingController();
   final passCtrl = TextEditingController();
-
   UserRole role = UserRole.patient;
 
   @override
@@ -27,11 +26,9 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final subtitle = switch (role) {
-      UserRole.patient => "Patient Login",
-      UserRole.doctor => "Doctor Login",
-      UserRole.admin => "Admin Login",
-    };
+    final subtitle = role == UserRole.patient
+        ? "Patient Login"
+        : "Doctor Login";
 
     return Scaffold(
       body: Container(
@@ -69,11 +66,9 @@ class _LoginPageState extends State<LoginPage> {
                   children: [
                     TextField(
                       controller: emailCtrl,
-                      decoration: InputDecoration(
-                        labelText: role == UserRole.admin
-                            ? "Username"
-                            : "Email",
-                        border: const OutlineInputBorder(),
+                      decoration: const InputDecoration(
+                        labelText: "Email / Username",
+                        border: OutlineInputBorder(),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -85,13 +80,11 @@ class _LoginPageState extends State<LoginPage> {
                         border: OutlineInputBorder(),
                       ),
                     ),
-                    if (role == UserRole.admin) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        "Admin credentials: admin / admin",
-                        style: TextStyle(color: Colors.black.withOpacity(0.6)),
-                      ),
-                    ],
+                    const SizedBox(height: 10),
+                    Text(
+                      "Admin can login from here using: admin / admin",
+                      style: TextStyle(color: Colors.black.withOpacity(0.6)),
+                    ),
                     const SizedBox(height: 16),
                     SizedBox(
                       height: 52,
@@ -101,20 +94,18 @@ class _LoginPageState extends State<LoginPage> {
                         child: const Text("Login"),
                       ),
                     ),
-                    if (role != UserRole.admin) ...[
-                      const SizedBox(height: 10),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => RegisterPage(initialRole: role),
-                            ),
-                          );
-                        },
-                        child: const Text("Create new account"),
-                      ),
-                    ],
+                    const SizedBox(height: 10),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => RegisterPage(initialRole: role),
+                          ),
+                        );
+                      },
+                      child: const Text("Create new account"),
+                    ),
                   ],
                 ),
               ),
@@ -126,6 +117,7 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _roleToggle() {
+    final isPatient = role == UserRole.patient;
     return Container(
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
@@ -134,18 +126,28 @@ class _LoginPageState extends State<LoginPage> {
       ),
       child: Row(
         children: [
-          Expanded(child: _seg("Patient", UserRole.patient)),
-          Expanded(child: _seg("Doctor", UserRole.doctor)),
-          Expanded(child: _seg("Admin", UserRole.admin)),
+          Expanded(
+            child: _seg(
+              "Patient",
+              isPatient,
+              () => setState(() => role = UserRole.patient),
+            ),
+          ),
+          Expanded(
+            child: _seg(
+              "Doctor",
+              !isPatient,
+              () => setState(() => role = UserRole.doctor),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  Widget _seg(String title, UserRole r) {
-    final selected = role == r;
+  Widget _seg(String title, bool selected, VoidCallback onTap) {
     return InkWell(
-      onTap: () => setState(() => role = r),
+      onTap: onTap,
       borderRadius: BorderRadius.circular(12),
       child: Container(
         height: 44,
@@ -190,7 +192,7 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
-    NotificationStore.add("Welcome ✅", "Logged in as ${role.name}.");
+    NotificationStore.add("Welcome ✅", "Logged in successfully.");
 
     Navigator.pushAndRemoveUntil(
       context,

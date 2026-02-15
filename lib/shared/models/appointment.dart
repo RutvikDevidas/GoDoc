@@ -1,20 +1,31 @@
 import 'doctor.dart';
-import 'patient.dart';
-import 'feedback.dart';
+import 'patient_profile.dart';
 
-enum AppointmentStatus { pending, accepted, rejected, completed }
+enum AppointmentStatus { pending, accepted, rejected, cancelled, completed }
+
+class FeedbackData {
+  final int rating;
+  final String comment;
+  final DateTime createdAt;
+
+  FeedbackData({
+    required this.rating,
+    required this.comment,
+    required this.createdAt,
+  });
+}
 
 class Appointment {
-  final String id;
+  String id;
   final Doctor doctor;
-  final Patient patient;
+  final PatientProfile? patient;
 
   DateTime dateTime;
   bool isOnline;
-  final int fee;
+  int fee;
 
   AppointmentStatus status;
-  FeedbackData? feedback; // patient can add after completed
+  FeedbackData? feedback;
 
   Appointment({
     required this.id,
@@ -23,9 +34,7 @@ class Appointment {
     required this.dateTime,
     required this.isOnline,
     required this.fee,
-    this.status = AppointmentStatus.pending,
-    this.feedback,
+    required this.status,
+    required this.feedback,
   });
-
-  bool get isCompleted => status == AppointmentStatus.completed;
 }

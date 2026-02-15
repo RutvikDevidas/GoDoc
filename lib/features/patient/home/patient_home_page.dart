@@ -5,6 +5,7 @@ import '../../../shared/models/doctor.dart';
 import '../../../shared/models/specialization.dart';
 import '../../../shared/stores/doctor_registry_store.dart';
 import '../../../shared/stores/notification_store.dart';
+import '../../../shared/widgets/app_image.dart';
 import '../doctors/doctor_detail_page.dart';
 import '../doctors/doctors_list_page.dart';
 import '../notifications/notifications_center_page.dart';
@@ -21,7 +22,6 @@ class _PatientHomePageState extends State<PatientHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ Seed doctors once into registry
     DoctorRegistryStore.seedIfEmpty(DemoData.doctors);
 
     return SafeArea(
@@ -36,7 +36,6 @@ class _PatientHomePageState extends State<PatientHomePage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           children: [
-            // Header
             Row(
               children: [
                 const CircleAvatar(
@@ -52,8 +51,6 @@ class _PatientHomePageState extends State<PatientHomePage> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
                   ),
                 ),
-
-                // ✅ Real-time badge update
                 ValueListenableBuilder(
                   valueListenable: NotificationStore.itemsVN,
                   builder: (_, __, ___) {
@@ -90,10 +87,7 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 ),
               ],
             ),
-
             const SizedBox(height: 12),
-
-            // Search
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
@@ -109,16 +103,12 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 ),
               ),
             ),
-
             const SizedBox(height: 18),
-
-            // Services
             const Text(
               "Services",
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 12),
-
             SizedBox(
               height: 92,
               child: ListView.separated(
@@ -133,21 +123,16 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 },
               ),
             ),
-
             const SizedBox(height: 18),
-
             const Text(
               "Top Doctor’s",
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 12),
-
-            // ✅ Doctors shown only if verified (admin verified)
             ValueListenableBuilder(
               valueListenable: DoctorRegistryStore.doctorsVN,
               builder: (_, __, ___) {
                 final visibleDoctors = DoctorRegistryStore.visibleForPatients();
-
                 final filtered = visibleDoctors
                     .where(
                       (d) =>
@@ -237,14 +222,11 @@ class _PatientHomePageState extends State<PatientHomePage> {
         ),
         child: Row(
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: Image.network(
-                doctor.imageUrl,
-                width: 72,
-                height: 72,
-                fit: BoxFit.cover,
-              ),
+            AppImage(
+              pathOrUrl: doctor.imageUrl,
+              width: 72,
+              height: 72,
+              radius: 14,
             ),
             const SizedBox(width: 12),
             Expanded(

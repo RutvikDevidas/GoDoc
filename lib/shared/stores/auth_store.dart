@@ -20,46 +20,26 @@ class AuthStore {
     final e = email.trim();
     final p = password.trim();
 
-    // ✅ Admin fixed credentials
-    if (role == UserRole.admin) {
-      if (e == "admin" && p == "admin") {
-        _loggedIn = true;
-        _role = UserRole.admin;
-        _name = "Admin";
-        _email = "admin";
-        return true;
-      }
-      return false;
+    // ✅ Admin credentials work from ANY toggle
+    if (e == "admin" && p == "admin") {
+      _loggedIn = true;
+      _role = UserRole.admin;
+      _name = "Admin";
+      _email = "admin";
+      return true;
     }
 
-    // Patient/Doctor demo validation
-    if (e.isEmpty || !e.contains("@")) return false;
+    // Normal patient/doctor demo validation
+    if (e.isEmpty || (!e.contains("@") && role != UserRole.doctor)) {
+      // for doctor we still allow non-email? (keep strict here)
+      return false;
+    }
     if (p.length < 4) return false;
 
     _loggedIn = true;
     _role = role;
     _email = e;
-    _name = e.split("@").first;
-    return true;
-  }
-
-  static bool register({
-    required String name,
-    required String email,
-    required String password,
-    required UserRole role,
-  }) {
-    // Admin cannot register
-    if (role == UserRole.admin) return false;
-
-    if (name.trim().isEmpty) return false;
-    if (!email.contains("@")) return false;
-    if (password.trim().length < 4) return false;
-
-    _loggedIn = true;
-    _role = role;
-    _name = name.trim();
-    _email = email.trim();
+    _name = e.contains("@") ? e.split("@").first : e;
     return true;
   }
 

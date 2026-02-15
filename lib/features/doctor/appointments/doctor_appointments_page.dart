@@ -1,32 +1,24 @@
 import 'package:flutter/material.dart';
+
 import '../../../shared/models/appointment.dart';
 import '../../../shared/stores/appointment_store.dart';
+import '../../../shared/stores/doctor_auth_store.dart';
 import 'appointment_action_page.dart';
 
-class DoctorAppointmentsPage extends StatefulWidget {
+class DoctorAppointmentsPage extends StatelessWidget {
   const DoctorAppointmentsPage({super.key});
 
   @override
-  State<DoctorAppointmentsPage> createState() => _DoctorAppointmentsPageState();
-}
-
-class _DoctorAppointmentsPageState extends State<DoctorAppointmentsPage> {
-  int tab = 0; // 0 pending, 1 accepted, 2 completed
-
-  @override
   Widget build(BuildContext context) {
-    final pending = AppointmentStore.doctorPending();
-    final accepted = AppointmentStore.doctorAccepted();
-    final completed = AppointmentStore.doctorCompleted();
+    final doctorId = DoctorAuthStore.currentDoctorId ?? "d1";
 
-    final list = switch (tab) {
-      0 => pending,
-      1 => accepted,
-      _ => completed,
-    };
+    final pending = AppointmentStore.doctorPending(doctorId);
+    final accepted = AppointmentStore.doctorAccepted(doctorId);
+    final completed = AppointmentStore.doctorCompleted(doctorId);
 
-    return SafeArea(
-      child: Container(
+    return Scaffold(
+      appBar: AppBar(title: const Text("Appointments")),
+      body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [Color(0xFFCCF4D2), Color(0xFFB9F0C7)],
@@ -34,111 +26,80 @@ class _DoctorAppointmentsPageState extends State<DoctorAppointmentsPage> {
             end: Alignment.bottomCenter,
           ),
         ),
-        child: Column(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
           children: [
-            const SizedBox(height: 10),
-            const Text(
-              "Appointments",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.75),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(child: _tab("Pending", 0)),
-                    Expanded(child: _tab("Accepted", 1)),
-                    Expanded(child: _tab("Done", 2)),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 10),
-            Expanded(
-              child: ListView.builder(
-                padding: const EdgeInsets.all(16),
-                itemCount: list.length,
-                itemBuilder: (_, i) => _card(list[i]),
-              ),
-            ),
+            _section("Pending", pending, context),
+            const SizedBox(height: 14),
+            _section("Accepted", accepted, context),
+            const SizedBox(height: 14),
+            _section("Completed", completed, context),
           ],
         ),
       ),
     );
   }
 
-  Widget _tab(String title, int idx) {
-    final selected = tab == idx;
-    return InkWell(
-      onTap: () => setState(() => tab = idx),
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        height: 44,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected ? const Color(0xFF2BB673) : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Text(
+  Widget _section(String title, List<Appointment> list, BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
           title,
-          style: TextStyle(
-            fontWeight: FontWeight.w800,
-            color: selected ? Colors.white : Colors.black,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
         ),
-      ),
+        const SizedBox(height: 10),
+        if (list.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.9),
+              borderRadius: BorderRadius.circular(18),
+            ),
+            child: const Text("No appointments"),
+          ),
+        ...list.map((a) => _tile(a, context)),
+      ],
     );
   }
 
-  Widget _card(Appointment a) {
+  Widget _tile(Appointment a, BuildContext context) {
+    final patientName = a.patient?.name ?? "Patient";
+    final patientPhone = a.patient?.phone ?? "-";
+
     return InkWell(
-      onTap: () async {
-        final changed = await Navigator.push<bool>(
+      onTap: () {
+        Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) => AppointmentActionPage(appointmentId: a.id),
           ),
         );
-        if (changed == true) setState(() {});
       },
       borderRadius: BorderRadius.circular(18),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.95),
+          color: Colors.white.withOpacity(0.9),
           borderRadius: BorderRadius.circular(18),
         ),
         child: Row(
           children: [
-            const CircleAvatar(
-              radius: 28,
-              backgroundImage: NetworkImage(
-                "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200",
-              ),
-            ),
-            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    a.patient.name,
+                    patientName,
                     style: const TextStyle(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 4),
-                  Text(a.isOnline ? "Online" : "Offline"),
-                  const SizedBox(height: 4),
+                  Text("Phone: $patientPhone"),
+                  const SizedBox(height: 6),
                   Text(
-                    a.dateTime.toString(),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                    _fmt(a.dateTime),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
                   ),
                 ],
               ),
@@ -148,5 +109,14 @@ class _DoctorAppointmentsPageState extends State<DoctorAppointmentsPage> {
         ),
       ),
     );
+  }
+
+  String _fmt(DateTime dt) {
+    final y = dt.year.toString();
+    final m = dt.month.toString().padLeft(2, "0");
+    final d = dt.day.toString().padLeft(2, "0");
+    final hh = dt.hour.toString().padLeft(2, "0");
+    final mm = dt.minute.toString().padLeft(2, "0");
+    return "$y-$m-$d $hh:$mm";
   }
 }

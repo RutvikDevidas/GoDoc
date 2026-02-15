@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # godoc
 
 A new Flutter project.
@@ -14,3 +15,6 @@ A few resources to get you started if this is your first Flutter project:
 For help getting started with Flutter development, view the
 [online documentation](https://docs.flutter.dev/), which offers tutorials,
 samples, guidance on mobile development, and a full API reference.
+=======
+# GoDoc
+>>>>>>> 62450c3a1b98a58a89b1d16e854e0bfd187da1c5

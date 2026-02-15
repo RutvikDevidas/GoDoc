@@ -1,95 +1,171 @@
 import 'package:flutter/material.dart';
 
-import '../home/admin_home_page.dart';
-import '../doctors/verify_doctors_page.dart';
-import '../users/admin_users_page.dart';
-import '../insights/reports_feedback_page.dart';
+import '../../../shared/stores/appointment_store.dart';
+import '../../../shared/stores/doctor_registry_store.dart';
+import '../../../shared/stores/notification_store.dart';
 
-class AdminShell extends StatefulWidget {
-  const AdminShell({super.key});
+class AdminHomePage extends StatelessWidget {
+  const AdminHomePage({super.key});
 
   @override
-  State<AdminShell> createState() => _AdminShellState();
-}
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFD6E4FF), Color(0xFFC7DAFF)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Row(
+              children: [
+                const Expanded(
+                  child: Text(
+                    "Admin Dashboard",
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                  ),
+                ),
+                ValueListenableBuilder(
+                  valueListenable: NotificationStore.itemsVN,
+                  builder: (_, __, ___) {
+                    final unread = NotificationStore.unreadCount();
+                    return Stack(
+                      children: [
+                        IconButton(
+                          onPressed: () {},
+                          icon: const Icon(Icons.notifications_none),
+                        ),
+                        if (unread > 0)
+                          Positioned(
+                            right: 10,
+                            top: 10,
+                            child: Container(
+                              width: 10,
+                              height: 10,
+                              decoration: const BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            ValueListenableBuilder(
+              valueListenable: DoctorRegistryStore.doctorsVN,
+              builder: (_, __, ___) {
+                final pendingDoctors =
+                    DoctorRegistryStore.pendingForAdmin().length;
+                final verifiedDoctors =
+                    DoctorRegistryStore.visibleForPatients().length;
 
-class _AdminShellState extends State<AdminShell> {
-  int index = 0;
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _statCard(
+                            "Pending Doctors",
+                            pendingDoctors.toString(),
+                            Icons.pending_actions_rounded,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _statCard(
+                            "Verified Doctors",
+                            verifiedDoctors.toString(),
+                            Icons.verified_rounded,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
 
-  final pages = const [
-    AdminHomePage(),
-    VerifyDoctorsPage(),
-    AdminUsersPage(),
-    ReportsFeedbackPage(),
-  ];
+                    ValueListenableBuilder(
+                      valueListenable: AppointmentStore.itemsVN,
+                      builder: (_, __, ___) {
+                        final totalAppts = AppointmentStore.all().length;
+                        final upcoming = AppointmentStore.upcoming().length;
 
-  ThemeData _adminTheme(BuildContext context) {
-    final base = Theme.of(context);
-    return base.copyWith(
-      colorScheme: base.colorScheme.copyWith(
-        primary: const Color(0xFF1E5BFF),
-        secondary: const Color(0xFF1E5BFF),
-      ),
-      appBarTheme: base.appBarTheme.copyWith(
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.black,
-        elevation: 0,
+                        return Row(
+                          children: [
+                            Expanded(
+                              child: _statCard(
+                                "Appointments",
+                                totalAppts.toString(),
+                                Icons.event_note_rounded,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: _statCard(
+                                "Upcoming",
+                                upcoming.toString(),
+                                Icons.schedule_rounded,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ],
+                );
+              },
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Theme(
-      data: _adminTheme(context),
-      child: Scaffold(
-        body: pages[index],
-
-        // ✅ FIX: make nav visible on gradient pages
-        bottomNavigationBar: SafeArea(
-          top: false,
-          child: Container(
+  Widget _statCard(String title, String value, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.92),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
             decoration: BoxDecoration(
-              color: Colors.white, // solid background
-              boxShadow: [
-                BoxShadow(
-                  blurRadius: 14,
-                  color: Colors.black.withOpacity(0.08),
-                  offset: const Offset(0, -2),
-                ),
-              ],
+              color: const Color(0xFF1E5BFF).withOpacity(0.12),
+              borderRadius: BorderRadius.circular(14),
             ),
-            child: BottomNavigationBar(
-              type: BottomNavigationBarType.fixed,
-              currentIndex: index,
-              onTap: (i) => setState(() => index = i),
-
-              backgroundColor: Colors.white,
-              selectedItemColor: const Color(0xFF1E5BFF),
-              unselectedItemColor: Colors.black.withOpacity(0.55),
-              showSelectedLabels: false,
-              showUnselectedLabels: false,
-
-              items: const [
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.dashboard_rounded),
-                  label: "Home",
+            child: Icon(icon, color: const Color(0xFF1E5BFF)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(color: Colors.black.withOpacity(0.65)),
                 ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.verified_user_rounded),
-                  label: "Verify",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.people_alt_rounded),
-                  label: "Users",
-                ),
-                BottomNavigationBarItem(
-                  icon: Icon(Icons.insights_rounded),
-                  label: "Insights",
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 18,
+                  ),
                 ),
               ],
             ),
           ),
-        ),
+        ],
       ),
     );
   }

@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
-import '../../../shared/stores/doctor_store.dart';
+
 import '../../../shared/stores/appointment_store.dart';
+import '../../../shared/stores/doctor_auth_store.dart';
 
 class DoctorHomePage extends StatelessWidget {
   const DoctorHomePage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final p = DoctorStore.profile;
-    final pending = AppointmentStore.doctorPending().length;
-    final accepted = AppointmentStore.doctorAccepted().length;
-    final completed = AppointmentStore.doctorCompleted().length;
+    final doctorId = DoctorAuthStore.currentDoctorId ?? "d1";
+
+    final pending = AppointmentStore.doctorPending(doctorId).length;
+    final accepted = AppointmentStore.doctorAccepted(doctorId).length;
+    final completed = AppointmentStore.doctorCompleted(doctorId).length;
 
     return SafeArea(
       child: Container(
@@ -24,67 +26,38 @@ class DoctorHomePage extends StatelessWidget {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            Text(
-              "Hello, ${p.name}",
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+            const Text(
+              "Doctor Dashboard",
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 12),
-            _statCard(
-              "Pending Requests",
-              pending.toString(),
-              Icons.hourglass_top,
+            Row(
+              children: [
+                Expanded(child: _card("Pending", pending.toString())),
+                const SizedBox(width: 12),
+                Expanded(child: _card("Accepted", accepted.toString())),
+              ],
             ),
-            const SizedBox(height: 10),
-            _statCard(
-              "Accepted",
-              accepted.toString(),
-              Icons.check_circle_outline,
-            ),
-            const SizedBox(height: 10),
-            _statCard("Completed", completed.toString(), Icons.task_alt),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.95),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Text(
-                "Tip: Keep your schedule updated so patients can book accurately.",
-                style: TextStyle(color: Colors.black.withOpacity(0.7)),
-              ),
-            ),
+            const SizedBox(height: 12),
+            _card("Completed", completed.toString()),
           ],
         ),
       ),
     );
   }
 
-  Widget _statCard(String title, String value, IconData icon) {
+  Widget _card(String title, String value) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.95),
+        color: Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(18),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: const Color(0xFF2BB673).withOpacity(0.18),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: Icon(icon),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
+          Text(title, style: TextStyle(color: Colors.black.withOpacity(0.65))),
+          const SizedBox(height: 6),
           Text(
             value,
             style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),

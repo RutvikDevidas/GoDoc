@@ -4,54 +4,63 @@ class AppNotification {
   final String id;
   final String title;
   final String message;
-  final DateTime time;
-  bool read;
+  bool isRead;
+  final DateTime createdAt;
 
   AppNotification({
     required this.id,
     required this.title,
     required this.message,
-    required this.time,
-    this.read = false,
+    required this.isRead,
+    required this.createdAt,
   });
 }
 
 class NotificationStore {
-  NotificationStore._();
+  static final List<AppNotification> _items = [];
+  static final ValueNotifier<int> itemsVN = ValueNotifier<int>(0);
 
-  static final ValueNotifier<List<AppNotification>> itemsVN =
-      ValueNotifier<List<AppNotification>>([]);
+  static void _notify() => itemsVN.value++;
 
-  static List<AppNotification> get items => itemsVN.value;
-
+  // ✅ your current usage
   static void add(String title, String message) {
-    final n = AppNotification(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      title: title,
-      message: message,
-      time: DateTime.now(),
-      read: false,
+    _items.insert(
+      0,
+      AppNotification(
+        id: DateTime.now().microsecondsSinceEpoch.toString(),
+        title: title,
+        message: message,
+        isRead: false,
+        createdAt: DateTime.now(),
+      ),
     );
-    itemsVN.value = [n, ...itemsVN.value];
+    _notify();
   }
 
-  static int unreadCount() => items.where((n) => !n.read).length;
+  // ✅ used by notifications_center_page.dart
+  static List<AppNotification> items() => List.unmodifiable(_items);
 
-  static void markAllRead() {
-    for (final n in items) {
-      n.read = true;
-    }
-    itemsVN.value = List<AppNotification>.from(itemsVN.value);
-  }
+  static int unreadCount() => _items.where((n) => !n.isRead).length;
 
   static void markRead(String id) {
-    final idx = items.indexWhere((e) => e.id == id);
-    if (idx == -1) return;
-    items[idx].read = true;
-    itemsVN.value = List<AppNotification>.from(itemsVN.value);
+    for (final n in _items) {
+      if (n.id == id) n.isRead = true;
+    }
+    _notify();
+  }
+
+  static void markAllRead() {
+    for (final n in _items) {
+      n.isRead = true;
+    }
+    _notify();
   }
 
   static void clearAll() {
-    itemsVN.value = [];
+    _items.clear();
+    _notify();
   }
+
+  // ✅ extra alias if your old code uses clear()
+  static void clear() => clearAll();
 }

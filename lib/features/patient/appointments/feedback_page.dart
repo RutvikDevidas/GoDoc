@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+
 import '../../../shared/stores/appointment_store.dart';
+import '../../../shared/stores/notification_store.dart';
 
 class FeedbackPage extends StatefulWidget {
   final String appointmentId;
@@ -11,62 +13,57 @@ class FeedbackPage extends StatefulWidget {
 
 class _FeedbackPageState extends State<FeedbackPage> {
   int rating = 5;
-  final ctrl = TextEditingController();
+  final c = TextEditingController();
 
   @override
   void dispose() {
-    ctrl.dispose();
+    c.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final a = AppointmentStore.byId(widget.appointmentId);
-
     return Scaffold(
       appBar: AppBar(title: const Text("Feedback")),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          if (a == null)
-            const Text("Appointment not found")
-          else ...[
-            Text(
-              a.doctor.name,
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFFCCF4D2), Color(0xFFB9F0C7)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Text(
+              "Rate the appointment",
+              style: TextStyle(fontWeight: FontWeight.w900),
             ),
-            const SizedBox(height: 12),
-            _card(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    "Rating",
-                    style: TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: List.generate(5, (i) {
-                      final star = i + 1;
-                      return IconButton(
-                        onPressed: () => setState(() => rating = star),
-                        icon: Icon(
-                          star <= rating ? Icons.star : Icons.star_border,
-                          color: Colors.amber,
-                        ),
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: ctrl,
-                    maxLines: 4,
-                    decoration: const InputDecoration(
-                      labelText: "Write your feedback",
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 10,
+              children: List.generate(5, (i) {
+                final v = i + 1;
+                return ChoiceChip(
+                  label: Text("$v ⭐"),
+                  selected: rating == v,
+                  onSelected: (_) => setState(() => rating = v),
+                );
+              }),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: c,
+              maxLines: 4,
+              decoration: InputDecoration(
+                hintText: "Write feedback...",
+                filled: true,
+                fillColor: Colors.white.withOpacity(0.9),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
             const SizedBox(height: 16),
@@ -74,26 +71,20 @@ class _FeedbackPageState extends State<FeedbackPage> {
               height: 52,
               child: ElevatedButton(
                 onPressed: () {
-                  AppointmentStore.addFeedback(a.id, rating, ctrl.text);
-                  Navigator.pop(context, true);
+                  AppointmentStore.addFeedback(
+                    widget.appointmentId,
+                    rating,
+                    c.text,
+                  );
+                  NotificationStore.add("Feedback Saved ✅", "Thanks!");
+                  Navigator.pop(context);
                 },
-                child: const Text("Submit Feedback"),
+                child: const Text("Submit"),
               ),
             ),
           ],
-        ],
+        ),
       ),
-    );
-  }
-
-  Widget _card({required Widget child}) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: child,
     );
   }
 }

@@ -15,57 +15,79 @@ class AdminShell extends StatefulWidget {
 class _AdminShellState extends State<AdminShell> {
   int index = 0;
 
-  final pages = const <Widget>[
+  final pages = const [
     AdminHomePage(),
     VerifyDoctorsPage(),
     AdminUsersPage(),
     ReportsFeedbackPage(),
   ];
 
+  ThemeData _adminTheme(BuildContext context) {
+    final base = Theme.of(context);
+    return base.copyWith(
+      colorScheme: base.colorScheme.copyWith(
+        primary: const Color(0xFF1E5BFF),
+        secondary: const Color(0xFF1E5BFF),
+      ),
+      appBarTheme: base.appBarTheme.copyWith(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.black,
+        elevation: 0,
+      ),
+      bottomNavigationBarTheme: base.bottomNavigationBarTheme.copyWith(
+        backgroundColor: Colors.white,
+        selectedItemColor: const Color(0xFF1E5BFF),
+        unselectedItemColor: Colors.black.withOpacity(0.55),
+        showSelectedLabels: false,
+        showUnselectedLabels: false,
+        type: BottomNavigationBarType.fixed,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: pages[index],
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                blurRadius: 14,
-                color: Colors.black.withOpacity(0.08),
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: BottomNavigationBar(
-            type: BottomNavigationBarType.fixed,
-            currentIndex: index,
-            onTap: (i) => setState(() => index = i),
-            backgroundColor: Colors.white,
-            selectedItemColor: const Color(0xFF1E5BFF),
-            unselectedItemColor: Colors.black.withOpacity(0.55),
-            showSelectedLabels: false,
-            showUnselectedLabels: false,
-            items: const [
-              BottomNavigationBarItem(
-                icon: Icon(Icons.dashboard_rounded),
-                label: "Home",
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.verified_user_rounded),
-                label: "Verify",
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.people_alt_rounded),
-                label: "Users",
-              ),
-              BottomNavigationBarItem(
-                icon: Icon(Icons.insights_rounded),
-                label: "Insights",
-              ),
-            ],
+    return Theme(
+      data: _adminTheme(context),
+      child: Scaffold(
+        body: pages[index],
+
+        // ✅ Nav always visible even on gradient pages
+        bottomNavigationBar: SafeArea(
+          top: false,
+          child: Container(
+            decoration: BoxDecoration(
+              color: Colors.white,
+              boxShadow: [
+                BoxShadow(
+                  blurRadius: 14,
+                  color: Colors.black.withOpacity(0.08),
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: BottomNavigationBar(
+              currentIndex: index,
+              onTap: (i) => setState(() => index = i),
+              items: const [
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.dashboard_rounded),
+                  label: "Home",
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.verified_user_rounded),
+                  label: "Verify",
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.people_alt_rounded),
+                  label: "Users",
+                ),
+                BottomNavigationBarItem(
+                  icon: Icon(Icons.insights_rounded),
+                  label: "Insights",
+                ),
+              ],
+            ),
           ),
         ),
       ),

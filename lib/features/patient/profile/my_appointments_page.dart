@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 
-import '../../../core/utils/datetime_fmt.dart';
 import '../../../shared/models/appointment.dart';
 import '../../../shared/stores/appointment_store.dart';
 import '../../../shared/stores/notification_store.dart';
+import '../../../shared/widgets/app_image.dart';
 import '../booking/reschedule_page.dart';
 import '../appointments/feedback_page.dart';
 
@@ -17,32 +17,46 @@ class MyAppointmentsPage extends StatefulWidget {
 class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
   @override
   Widget build(BuildContext context) {
-    final upcoming = AppointmentStore.patientUpcoming();
-    final history = AppointmentStore.patientHistory();
+    return ValueListenableBuilder(
+      valueListenable: AppointmentStore.itemsVN,
+      builder: (_, __, ___) {
+        final upcoming = AppointmentStore.patientUpcoming();
+        final history = AppointmentStore.patientHistory();
 
-    return Scaffold(
-      appBar: AppBar(title: const Text("My Appointments")),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          const Text(
-            "Current Appointments",
-            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-          ),
-          const SizedBox(height: 10),
-          if (upcoming.isEmpty) _empty("No current appointments"),
-          ...upcoming.map((a) => _upcomingTile(a)),
+        return Scaffold(
+          appBar: AppBar(title: const Text("My Appointments")),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFCCF4D2), Color(0xFFB9F0C7)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const Text(
+                  "Current Appointments",
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
+                const SizedBox(height: 10),
+                if (upcoming.isEmpty) _empty("No current appointments"),
+                ...upcoming.map((a) => _upcomingTile(a)),
 
-          const SizedBox(height: 18),
-          const Text(
-            "Appointment History",
-            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                const SizedBox(height: 18),
+                const Text(
+                  "Appointment History",
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                ),
+                const SizedBox(height: 10),
+                if (history.isEmpty) _empty("No history yet"),
+                ...history.map((a) => _historyTile(a)),
+              ],
+            ),
           ),
-          const SizedBox(height: 10),
-          if (history.isEmpty) _empty("No history yet"),
-          ...history.map((a) => _historyTile(a)),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -51,7 +65,7 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
       padding: const EdgeInsets.all(16),
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Center(
@@ -64,16 +78,21 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
   // UPCOMING TILE
   // -------------------------
   Widget _upcomingTile(Appointment a) {
-    final when = DateTimeFmt.nice(context, a.dateTime);
+    final when = _nice(context, a.dateTime);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(18),
       ),
       child: ListTile(
-        leading: CircleAvatar(backgroundImage: NetworkImage(a.doctor.imageUrl)),
+        leading: AppImage(
+          pathOrUrl: a.doctor.imageUrl,
+          width: 46,
+          height: 46,
+          radius: 999,
+        ),
         title: Text(
           a.doctor.name,
           style: const TextStyle(fontWeight: FontWeight.w900),
@@ -100,18 +119,19 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
             IconButton(
               tooltip: "Reschedule",
               onPressed: () async {
-                final ok = await Navigator.push<bool>(
+                final newDateTime = await Navigator.push<DateTime?>(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => ReschedulePage(appointmentId: a.id),
+                    builder: (_) => ReschedulePage(appointment: a),
                   ),
                 );
-                if (ok == true) {
+
+                if (newDateTime != null) {
+                  AppointmentStore.reschedule(a.id, newDateTime);
                   NotificationStore.add(
                     "Rescheduled ✅",
                     "Appointment updated.",
                   );
-                  setState(() {});
                 }
               },
               icon: const Icon(Icons.edit_calendar),
@@ -131,20 +151,26 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
   // HISTORY TILE
   // -------------------------
   Widget _historyTile(Appointment a) {
-    final when = DateTimeFmt.nice(context, a.dateTime);
+    final when = _nice(context, a.dateTime);
+    final completed = a.status == AppointmentStatus.completed;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Theme.of(context).cardColor,
+        color: Colors.white.withOpacity(0.9),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Column(
         children: [
           Row(
             children: [
-              CircleAvatar(backgroundImage: NetworkImage(a.doctor.imageUrl)),
+              AppImage(
+                pathOrUrl: a.doctor.imageUrl,
+                width: 46,
+                height: 46,
+                radius: 999,
+              ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -161,38 +187,38 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
                       spacing: 8,
                       children: [
                         _pill(a.isOnline ? "Online" : "Offline"),
-                        _pill("Completed"),
+                        _pill(_statusLabel(a.status)),
                       ],
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.check_circle, color: Color(0xFF2BB673)),
+              Icon(
+                completed ? Icons.check_circle : Icons.history,
+                color: completed ? const Color(0xFF2BB673) : Colors.black54,
+              ),
             ],
           ),
           const SizedBox(height: 12),
 
-          if (a.feedback == null)
+          if (a.status == AppointmentStatus.completed && a.feedback == null)
             SizedBox(
               width: double.infinity,
               height: 46,
               child: OutlinedButton(
                 onPressed: () async {
-                  final ok = await Navigator.push<bool>(
+                  await Navigator.push(
                     context,
                     MaterialPageRoute(
                       builder: (_) => FeedbackPage(appointmentId: a.id),
                     ),
                   );
-                  if (ok == true) {
-                    NotificationStore.add("Thanks ⭐", "Feedback submitted.");
-                    setState(() {});
-                  }
+                  NotificationStore.add("Thanks ⭐", "Feedback submitted.");
                 },
                 child: const Text("Give Feedback"),
               ),
             )
-          else
+          else if (a.feedback != null)
             Container(
               width: double.infinity,
               padding: const EdgeInsets.all(12),
@@ -245,6 +271,8 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
         return "Accepted";
       case AppointmentStatus.rejected:
         return "Rejected";
+      case AppointmentStatus.cancelled:
+        return "Cancelled";
       case AppointmentStatus.completed:
         return "Completed";
     }
@@ -272,12 +300,25 @@ class _MyAppointmentsPageState extends State<MyAppointmentsPage> {
     if (ok == true) {
       AppointmentStore.delete(id);
       NotificationStore.add("Deleted ❌", "Appointment deleted.");
-      setState(() {});
       if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(const SnackBar(content: Text("Appointment deleted")));
       }
     }
+  }
+
+  // Simple formatter (replaces DateTimeFmt.nice)
+  String _nice(BuildContext context, DateTime dt) {
+    final y = dt.year.toString();
+    final m = dt.month.toString().padLeft(2, "0");
+    final d = dt.day.toString().padLeft(2, "0");
+
+    final hh = dt.hour;
+    final mm = dt.minute.toString().padLeft(2, "0");
+    final ampm = hh >= 12 ? "PM" : "AM";
+    final h12 = (hh % 12 == 0) ? 12 : (hh % 12);
+
+    return "$y-$m-$d  $h12:$mm $ampm";
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../../../shared/stores/notification_store.dart';
 
 class NotificationsCenterPage extends StatelessWidget {
@@ -12,12 +13,16 @@ class NotificationsCenterPage extends StatelessWidget {
         actions: [
           IconButton(
             tooltip: "Mark all read",
-            onPressed: () => NotificationStore.markAllRead(),
+            onPressed: () {
+              NotificationStore.markAllRead();
+            },
             icon: const Icon(Icons.done_all),
           ),
           IconButton(
             tooltip: "Clear all",
-            onPressed: () => NotificationStore.clearAll(),
+            onPressed: () {
+              NotificationStore.clearAll();
+            },
             icon: const Icon(Icons.delete_sweep),
           ),
         ],
@@ -25,7 +30,7 @@ class NotificationsCenterPage extends StatelessWidget {
       body: ValueListenableBuilder(
         valueListenable: NotificationStore.itemsVN,
         builder: (context, _, __) {
-          final items = NotificationStore.items;
+          final items = NotificationStore.items(); // ✅ FIX: call method
 
           if (items.isEmpty) {
             return Center(
@@ -52,26 +57,32 @@ class NotificationsCenterPage extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: n.read
-                        ? Colors.white.withOpacity(0.85)
-                        : const Color(0xFF2BB673).withOpacity(0.16),
+                    color: Colors.white.withOpacity(0.92),
                     borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: n.isRead
+                          ? Colors.transparent
+                          : const Color(0xFF2BB673).withOpacity(0.35),
+                    ),
                   ),
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Container(
                         width: 44,
                         height: 44,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: (n.isRead
+                              ? Colors.black.withOpacity(0.08)
+                              : const Color(0xFF2BB673).withOpacity(0.15)),
                           borderRadius: BorderRadius.circular(14),
                         ),
                         child: Icon(
-                          n.read
+                          n.isRead
                               ? Icons.notifications
                               : Icons.notifications_active,
-                          color: n.read
-                              ? Colors.black87
+                          color: n.isRead
+                              ? Colors.black.withOpacity(0.55)
                               : const Color(0xFF0B8F4D),
                         ),
                       ),
@@ -82,31 +93,33 @@ class NotificationsCenterPage extends StatelessWidget {
                           children: [
                             Text(
                               n.title,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.w900,
-                                fontSize: 14,
+                                color: n.isRead
+                                    ? Colors.black.withOpacity(0.85)
+                                    : Colors.black,
                               ),
                             ),
                             const SizedBox(height: 6),
                             Text(
                               n.message,
                               style: TextStyle(
-                                color: Colors.black.withOpacity(0.7),
+                                color: Colors.black.withOpacity(0.70),
                               ),
                             ),
-                            const SizedBox(height: 6),
+                            const SizedBox(height: 8),
                             Text(
-                              _timeText(n.time),
+                              _timeAgo(n.createdAt),
                               style: TextStyle(
                                 fontSize: 12,
-                                color: Colors.black.withOpacity(0.5),
+                                color: Colors.black.withOpacity(0.55),
                               ),
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(width: 10),
-                      if (!n.read)
+                      const SizedBox(width: 8),
+                      if (!n.isRead)
                         Container(
                           width: 10,
                           height: 10,
@@ -126,9 +139,11 @@ class NotificationsCenterPage extends StatelessWidget {
     );
   }
 
-  static String _timeText(DateTime t) {
-    final hh = t.hour.toString().padLeft(2, '0');
-    final mm = t.minute.toString().padLeft(2, '0');
-    return "${t.year}-${t.month.toString().padLeft(2, '0')}-${t.day.toString().padLeft(2, '0')}  $hh:$mm";
+  static String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return "Just now";
+    if (diff.inMinutes < 60) return "${diff.inMinutes} min ago";
+    if (diff.inHours < 24) return "${diff.inHours} hr ago";
+    return "${diff.inDays} day(s) ago";
   }
 }
