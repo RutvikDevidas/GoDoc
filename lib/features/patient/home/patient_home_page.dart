@@ -1,13 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
-import '../../../shared/data/demo_data.dart';
-import '../../../shared/models/doctor.dart';
-import '../../../shared/models/specialization.dart';
-import '../../../shared/stores/doctor_registry_store.dart';
-import '../../../shared/stores/notification_store.dart';
-import '../../../shared/widgets/app_image.dart';
 import '../doctors/doctor_detail_page.dart';
-import '../doctors/doctors_list_page.dart';
+// import '../doctors/doctors_list_page.dart';
 import '../notifications/notifications_center_page.dart';
 
 class PatientHomePage extends StatefulWidget {
@@ -22,7 +18,7 @@ class _PatientHomePageState extends State<PatientHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    DoctorRegistryStore.seedIfEmpty(DemoData.doctors);
+    final uid = FirebaseAuth.instance.currentUser!.uid;
 
     return SafeArea(
       child: Container(
@@ -36,14 +32,10 @@ class _PatientHomePageState extends State<PatientHomePage> {
         child: ListView(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           children: [
+            // ---------------- HEADER ----------------
             Row(
               children: [
-                const CircleAvatar(
-                  radius: 22,
-                  backgroundImage: NetworkImage(
-                    "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200",
-                  ),
-                ),
+                const CircleAvatar(radius: 22),
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
@@ -51,13 +43,23 @@ class _PatientHomePageState extends State<PatientHomePage> {
                     style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
                   ),
                 ),
-                ValueListenableBuilder(
-                  valueListenable: NotificationStore.itemsVN,
-                  builder: (_, __, ___) {
-                    final unread = NotificationStore.unreadCount();
+
+                // 🔔 Notification Icon (Firestore Based)
+                StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance
+                      .collection('notifications')
+                      .where('userId', isEqualTo: uid)
+                      .where('isRead', isEqualTo: false)
+                      .snapshots(),
+                  builder: (context, snapshot) {
+                    final unread = snapshot.hasData
+                        ? snapshot.data!.docs.length
+                        : 0;
+
                     return Stack(
                       children: [
                         IconButton(
+                          icon: const Icon(Icons.notifications_none),
                           onPressed: () {
                             Navigator.push(
                               context,
@@ -66,7 +68,6 @@ class _PatientHomePageState extends State<PatientHomePage> {
                               ),
                             );
                           },
-                          icon: const Icon(Icons.notifications_none),
                         ),
                         if (unread > 0)
                           Positioned(
@@ -87,7 +88,10 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 ),
               ],
             ),
+
             const SizedBox(height: 12),
+
+            // ---------------- SEARCH ----------------
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
@@ -103,42 +107,34 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 ),
               ),
             ),
+
             const SizedBox(height: 18),
+
             const Text(
-              "Services",
+              "Available Doctors",
               style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
             ),
+
             const SizedBox(height: 12),
-            SizedBox(
-              height: 92,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                padding: const EdgeInsets.only(right: 6),
-                itemCount: DemoData.specializations.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 12),
-                itemBuilder: (context, index) {
-                  final spec = DemoData.specializations[index];
-                  return _serviceCard(spec);
-                },
-              ),
-            ),
-            const SizedBox(height: 18),
-            const Text(
-              "Top Doctor’s",
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 12),
-            ValueListenableBuilder(
-              valueListenable: DoctorRegistryStore.doctorsVN,
-              builder: (_, __, ___) {
-                final visibleDoctors = DoctorRegistryStore.visibleForPatients();
-                final filtered = visibleDoctors
-                    .where(
-                      (d) =>
-                          d.name.toLowerCase().contains(search.toLowerCase()),
-                    )
-                    .toList();
+
+            // ---------------- FIRESTORE DOCTORS ----------------
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('doctors')
+                  .where('isVerified', isEqualTo: true)
+                  .snapshots(),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                final doctors = snapshot.data!.docs;
+
+                final filtered = doctors.where((doc) {
+                  final data = doc.data() as Map<String, dynamic>;
+                  final name = (data['name'] ?? "").toLowerCase();
+                  return name.contains(search.toLowerCase());
+                }).toList();
 
                 if (filtered.isEmpty) {
                   return Container(
@@ -149,7 +145,7 @@ class _PatientHomePageState extends State<PatientHomePage> {
                     ),
                     child: const Center(
                       child: Text(
-                        "No verified doctors available yet.",
+                        "No verified doctors available.",
                         style: TextStyle(fontWeight: FontWeight.w800),
                       ),
                     ),
@@ -157,7 +153,11 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 }
 
                 return Column(
-                  children: filtered.map((d) => _doctorCard(d)).toList(),
+                  children: filtered.map((doc) {
+                    final data = doc.data() as Map<String, dynamic>;
+
+                    return _doctorCard(context, doc.id, data);
+                  }).toList(),
                 );
               },
             ),
@@ -167,49 +167,18 @@ class _PatientHomePageState extends State<PatientHomePage> {
     );
   }
 
-  Widget _serviceCard(Specialization spec) {
+  Widget _doctorCard(
+    BuildContext context,
+    String doctorId,
+    Map<String, dynamic> data,
+  ) {
     return InkWell(
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => DoctorsListPage(spec: spec)),
-        );
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        width: 110,
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
-        decoration: BoxDecoration(
-          color: const Color(0xFF0B8F4D),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Text(spec.icon, style: const TextStyle(fontSize: 22)),
-            const SizedBox(height: 8),
-            Text(
-              spec.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _doctorCard(Doctor doctor) {
-    return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => DoctorDetailPage(doctor: doctor)),
+          MaterialPageRoute(
+            builder: (_) => DoctorDetailPage(doctorId: doctorId),
+          ),
         );
       },
       borderRadius: BorderRadius.circular(18),
@@ -222,11 +191,14 @@ class _PatientHomePageState extends State<PatientHomePage> {
         ),
         child: Row(
           children: [
-            AppImage(
-              pathOrUrl: doctor.imageUrl,
-              width: 72,
-              height: 72,
-              radius: 14,
+            CircleAvatar(
+              radius: 36,
+              backgroundImage: data['profileImage'] != null
+                  ? NetworkImage(data['profileImage'])
+                  : null,
+              child: data['profileImage'] == null
+                  ? const Icon(Icons.person)
+                  : null,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -234,51 +206,24 @@ class _PatientHomePageState extends State<PatientHomePage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    doctor.name,
+                    data['name'] ?? '',
                     style: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 14,
                     ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 4),
                   Text(
-                    doctor.title,
+                    data['specialization'] ?? '',
                     style: TextStyle(
                       color: Colors.black.withOpacity(0.6),
                       fontSize: 12,
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      const Icon(Icons.star, size: 16, color: Colors.amber),
-                      const SizedBox(width: 4),
-                      Text(
-                        doctor.rating.toStringAsFixed(1),
-                        style: const TextStyle(fontWeight: FontWeight.w700),
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        "(${doctor.reviews} reviews)",
-                        style: TextStyle(
-                          color: Colors.black.withOpacity(0.55),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
                 ],
               ),
             ),
-            Container(
-              width: 38,
-              height: 38,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.arrow_forward_ios, size: 16),
-            ),
+            const Icon(Icons.arrow_forward_ios, size: 16),
           ],
         ),
       ),

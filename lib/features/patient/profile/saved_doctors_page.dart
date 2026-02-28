@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import '../../../shared/data/demo_data.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../doctors/doctor_detail_page.dart';
 
 class SavedDoctorsPage extends StatelessWidget {
@@ -7,67 +8,98 @@ class SavedDoctorsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final saved = DemoData.doctors.take(2).toList(); // demo saved list
+    final uid = FirebaseAuth.instance.currentUser!.uid;
 
     return Scaffold(
       appBar: AppBar(title: const Text("Saved Doctors")),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: saved.isEmpty
-            ? [const Center(child: Text("No saved doctors"))]
-            : saved
-                  .map(
-                    (d) => InkWell(
-                      onTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => DoctorDetailPage(doctor: d),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('saved_doctors')
+            .where('userId', isEqualTo: uid)
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          final savedDocs = snapshot.data!.docs;
+
+          if (savedDocs.isEmpty) {
+            return const Center(child: Text("No saved doctors"));
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: savedDocs.length,
+            itemBuilder: (context, index) {
+              final doctorId = savedDocs[index]['doctorId'];
+
+              return FutureBuilder<DocumentSnapshot>(
+                future: FirebaseFirestore.instance
+                    .collection('doctors')
+                    .doc(doctorId)
+                    .get(),
+                builder: (context, doctorSnap) {
+                  if (!doctorSnap.hasData) {
+                    return const SizedBox();
+                  }
+
+                  final data = doctorSnap.data!.data() as Map<String, dynamic>;
+
+                  return InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => DoctorDetailPage(doctorId: doctorId),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).cardColor,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 35,
+                            backgroundImage: data['profileImage'] != null
+                                ? NetworkImage(data['profileImage'])
+                                : null,
+                            child: data['profileImage'] == null
+                                ? const Icon(Icons.person)
+                                : null,
                           ),
-                        );
-                      },
-                      borderRadius: BorderRadius.circular(18),
-                      child: Container(
-                        margin: const EdgeInsets.only(bottom: 12),
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context).cardColor,
-                          borderRadius: BorderRadius.circular(18),
-                        ),
-                        child: Row(
-                          children: [
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(14),
-                              child: Image.network(
-                                d.imageUrl,
-                                width: 70,
-                                height: 70,
-                                fit: BoxFit.cover,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    d.name,
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                    ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data['name'] ?? '',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(d.title),
-                                ],
-                              ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(data['specialization'] ?? ''),
+                              ],
                             ),
-                            const Icon(Icons.arrow_forward_ios, size: 16),
-                          ],
-                        ),
+                          ),
+                          const Icon(Icons.arrow_forward_ios, size: 16),
+                        ],
                       ),
                     ),
-                  )
-                  .toList(),
+                  );
+                },
+              );
+            },
+          );
+        },
       ),
     );
   }

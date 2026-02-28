@@ -1,115 +1,77 @@
 import 'package:flutter/material.dart';
-
-import '../../../shared/models/doctor.dart';
-import '../../../shared/models/specialization.dart';
-import '../../../shared/stores/doctor_registry_store.dart';
-import '../../../shared/widgets/app_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'doctor_detail_page.dart';
 
 class DoctorsListPage extends StatelessWidget {
-  final Specialization spec;
-  const DoctorsListPage({super.key, required this.spec});
+  const DoctorsListPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    final verifiedDoctors = DoctorRegistryStore.visibleForPatients()
-        .where((d) => d.specializationId == spec.id)
-        .toList();
-
     return Scaffold(
-      appBar: AppBar(title: Text(spec.name)),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFCCF4D2), Color(0xFFB9F0C7)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (verifiedDoctors.isEmpty)
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                child: const Center(
-                  child: Text(
-                    "No verified doctors for this service yet.",
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
-                ),
-              ),
-            ...verifiedDoctors.map((d) => _doctorCard(context, d)),
-          ],
-        ),
-      ),
-    );
-  }
+      appBar: AppBar(title: const Text("Nearby Doctors")),
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance
+            .collection('doctors')
+            .where('isVerified', isEqualTo: true) // ✅ ONLY VERIFIED
+            .snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
 
-  Widget _doctorCard(BuildContext context, Doctor doctor) {
-    return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => DoctorDetailPage(doctor: doctor)),
-        );
-      },
-      borderRadius: BorderRadius.circular(18),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.9),
-          borderRadius: BorderRadius.circular(18),
-        ),
-        child: Row(
-          children: [
-            AppImage(
-              pathOrUrl: doctor.imageUrl,
-              width: 70,
-              height: 70,
-              radius: 14,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    doctor.name,
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text("No verified doctors available"));
+          }
+
+          final doctors = snapshot.data!.docs;
+
+          return ListView.builder(
+            itemCount: doctors.length,
+            itemBuilder: (context, index) {
+              final doc = doctors[index];
+              final data = doc.data() as Map<String, dynamic>;
+
+              return Card(
+                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: ListTile(
+                  contentPadding: const EdgeInsets.all(12),
+                  leading: CircleAvatar(
+                    radius: 28,
+                    backgroundImage: data['profileImage'] != null
+                        ? NetworkImage(data['profileImage'])
+                        : null,
+                    child: data['profileImage'] == null
+                        ? const Icon(Icons.person)
+                        : null,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    doctor.title,
-                    style: TextStyle(color: Colors.black.withOpacity(0.65)),
+                  title: Text(
+                    data['name'] ?? "Doctor",
+                    style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
-                  const SizedBox(height: 8),
-                  Row(
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.star, size: 16, color: Colors.amber),
-                      const SizedBox(width: 6),
-                      Text(
-                        doctor.rating.toStringAsFixed(1),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
-                      ),
-                      const SizedBox(width: 10),
-                      Text(
-                        "(${doctor.reviews} reviews)",
-                        style: TextStyle(color: Colors.black.withOpacity(0.55)),
-                      ),
+                      Text(data['specialization'] ?? ""),
+                      Text(data['clinicName'] ?? ""),
                     ],
                   ),
-                ],
-              ),
-            ),
-            const Icon(Icons.arrow_forward_ios, size: 16),
-          ],
-        ),
+                  trailing: const Icon(Icons.arrow_forward_ios),
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => DoctorDetailPage(doctorId: doc.id),
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+          );
+        },
       ),
     );
   }

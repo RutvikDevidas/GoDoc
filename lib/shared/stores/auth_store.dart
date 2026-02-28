@@ -4,14 +4,41 @@ class AuthStore {
   static bool _loggedIn = false;
   static UserRole _role = UserRole.patient;
 
-  static String _name = "Patient";
-  static String _email = "patient@godoc.com";
+  static String _name = "";
+  static String _email = "";
+
+  static final List<Map<String, dynamic>> _users = [];
 
   static bool get isLoggedIn => _loggedIn;
   static UserRole get role => _role;
   static String get name => _name;
   static String get email => _email;
 
+  // ---------------- REGISTER ----------------
+  static bool register({
+    required String name,
+    required String email,
+    required String password,
+    required UserRole role,
+  }) {
+    final e = email.trim();
+    final p = password.trim();
+    final n = name.trim();
+
+    if (n.isEmpty || e.isEmpty || p.length < 4) {
+      return false;
+    }
+
+    // Prevent duplicate user
+    final exists = _users.any((u) => u["email"] == e);
+    if (exists) return false;
+
+    _users.add({"name": n, "email": e, "password": p, "role": role});
+
+    return true;
+  }
+
+  // ---------------- LOGIN ----------------
   static bool login({
     required String email,
     required String password,
@@ -20,7 +47,7 @@ class AuthStore {
     final e = email.trim();
     final p = password.trim();
 
-    // ✅ Admin credentials work from ANY toggle
+    // ADMIN LOGIN
     if (e == "admin" && p == "admin") {
       _loggedIn = true;
       _role = UserRole.admin;
@@ -29,22 +56,24 @@ class AuthStore {
       return true;
     }
 
-    // Normal patient/doctor demo validation
-    if (e.isEmpty || (!e.contains("@") && role != UserRole.doctor)) {
-      // for doctor we still allow non-email? (keep strict here)
-      return false;
-    }
-    if (p.length < 4) return false;
+    final user = _users.where(
+      (u) => u["email"] == e && u["password"] == p && u["role"] == role,
+    );
+
+    if (user.isEmpty) return false;
 
     _loggedIn = true;
     _role = role;
+    _name = user.first["name"];
     _email = e;
-    _name = e.contains("@") ? e.split("@").first : e;
+
     return true;
   }
 
   static void logout() {
     _loggedIn = false;
     _role = UserRole.patient;
+    _name = "";
+    _email = "";
   }
 }

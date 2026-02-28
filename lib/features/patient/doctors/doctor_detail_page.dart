@@ -1,117 +1,166 @@
 import 'package:flutter/material.dart';
-
-import '../../../shared/models/doctor.dart';
-import '../../../shared/widgets/app_image.dart';
-import '../booking/appointment_page.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class DoctorDetailPage extends StatelessWidget {
-  final Doctor doctor;
-  const DoctorDetailPage({super.key, required this.doctor});
+  final String doctorId;
+
+  const DoctorDetailPage({super.key, required this.doctorId});
 
   @override
   Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser!.uid;
+
     return Scaffold(
-      appBar: AppBar(title: const Text("Doctor Details")),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFCCF4D2), Color(0xFFB9F0C7)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            AppImage(
-              pathOrUrl: doctor.imageUrl,
-              width: double.infinity,
-              height: 220,
-              radius: 18,
-            ),
-            const SizedBox(height: 14),
-            Text(
-              doctor.name,
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              doctor.title,
-              style: TextStyle(color: Colors.black.withOpacity(0.65)),
-            ),
-            const SizedBox(height: 10),
+      appBar: AppBar(
+        title: const Text("Doctor Details"),
+        actions: [
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('saved_doctors')
+                .where('userId', isEqualTo: uid)
+                .where('doctorId', isEqualTo: doctorId)
+                .snapshots(),
+            builder: (context, snapshot) {
+              final isSaved =
+                  snapshot.hasData && snapshot.data!.docs.isNotEmpty;
 
-            _pillRow(),
-            const SizedBox(height: 14),
-
-            _card("Clinic / Hospital", doctor.hospital),
-            const SizedBox(height: 10),
-            _card("Address", doctor.address),
-            const SizedBox(height: 10),
-            _card("About", doctor.about),
-
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 52,
-              child: ElevatedButton(
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => AppointmentPage(doctor: doctor),
-                    ),
-                  );
+              return IconButton(
+                icon: Icon(
+                  isSaved ? Icons.favorite : Icons.favorite_border,
+                  color: Colors.red,
+                ),
+                onPressed: () async {
+                  if (isSaved) {
+                    await snapshot.data!.docs.first.reference.delete();
+                  } else {
+                    await FirebaseFirestore.instance
+                        .collection('saved_doctors')
+                        .add({
+                          'userId': uid,
+                          'doctorId': doctorId,
+                          'createdAt': Timestamp.now(),
+                        });
+                  }
                 },
-                child: const Text("Book Appointment"),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _pillRow() {
-    return Row(
-      children: [
-        _pill(Icons.star, "${doctor.rating.toStringAsFixed(1)}"),
-        const SizedBox(width: 10),
-        _pill(Icons.reviews, "${doctor.reviews} reviews"),
-      ],
-    );
-  }
-
-  Widget _pill(IconData icon, String text) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 16),
-          const SizedBox(width: 8),
-          Text(text, style: const TextStyle(fontWeight: FontWeight.w800)),
+              );
+            },
+          ),
         ],
       ),
+      body: FutureBuilder<DocumentSnapshot>(
+        future: FirebaseFirestore.instance
+            .collection('doctors')
+            .doc(doctorId)
+            .get(),
+        builder: (context, snapshot) {
+          if (!snapshot.hasData) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.data!.exists) {
+            return const Center(child: Text("Doctor not found"));
+          }
+
+          final data = snapshot.data!.data() as Map<String, dynamic>;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Profile Image
+                Center(
+                  child: CircleAvatar(
+                    radius: 60,
+                    backgroundImage: data['profileImage'] != null
+                        ? NetworkImage(data['profileImage'])
+                        : null,
+                    child: data['profileImage'] == null
+                        ? const Icon(Icons.person, size: 60)
+                        : null,
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Name + Verified Badge
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      data['name'] ?? '',
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    if (data['isVerified'] == true)
+                      const Icon(Icons.verified, color: Colors.green, size: 20),
+                  ],
+                ),
+
+                const SizedBox(height: 8),
+
+                Center(
+                  child: Text(
+                    data['specialization'] ?? '',
+                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+
+                _infoTile("Clinic Name", data['clinicName'] ?? ''),
+                _infoTile("Clinic Address", data['clinicAddress'] ?? ''),
+                _infoTile("Experience", "${data['experience'] ?? ''} years"),
+                _infoTile("License No", data['licenseNo'] ?? ''),
+                _infoTile("PR Number", data['prNumber'] ?? ''),
+                _infoTile("KMC Number", data['kmcNumber'] ?? ''),
+
+                const SizedBox(height: 30),
+
+                // Book Appointment Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2BB673),
+                    ),
+                    onPressed: () {
+                      // Next step: Appointment screen
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Appointment booking coming next 🚀"),
+                        ),
+                      );
+                    },
+                    child: const Text(
+                      "Book Appointment",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _card(String title, String value) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.9),
-        borderRadius: BorderRadius.circular(18),
-      ),
+  Widget _infoTile(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w900)),
-          const SizedBox(height: 8),
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
           Text(value),
+          const Divider(),
         ],
       ),
     );

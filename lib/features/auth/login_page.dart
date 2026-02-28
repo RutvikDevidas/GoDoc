@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../services/firebase_auth_service.dart';
 import '../../shared/models/user_role.dart';
-import '../../shared/stores/auth_store.dart';
-import '../../shared/stores/notification_store.dart';
-import 'auth_gate.dart';
+import '../doctor/shell/doctor_shell.dart';
+import '../patient/shell/patient_shell.dart';
 import 'register_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -15,7 +16,9 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final emailCtrl = TextEditingController();
   final passCtrl = TextEditingController();
-  UserRole role = UserRole.patient;
+
+  UserRole selectedRole = UserRole.patient;
+  bool isLoading = false;
 
   @override
   void dispose() {
@@ -26,7 +29,7 @@ class _LoginPageState extends State<LoginPage> {
 
   @override
   Widget build(BuildContext context) {
-    final subtitle = role == UserRole.patient
+    final subtitle = selectedRole == UserRole.patient
         ? "Patient Login"
         : "Doctor Login";
 
@@ -53,13 +56,12 @@ class _LoginPageState extends State<LoginPage> {
               Text(
                 subtitle,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.black.withOpacity(0.6)),
+                style: const TextStyle(color: Colors.black54),
               ),
               const SizedBox(height: 20),
 
               _roleToggle(),
-
-              const SizedBox(height: 18),
+              const SizedBox(height: 20),
 
               _card(
                 child: Column(
@@ -67,7 +69,7 @@ class _LoginPageState extends State<LoginPage> {
                     TextField(
                       controller: emailCtrl,
                       decoration: const InputDecoration(
-                        labelText: "Email / Username",
+                        labelText: "Email",
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -80,27 +82,30 @@ class _LoginPageState extends State<LoginPage> {
                         border: OutlineInputBorder(),
                       ),
                     ),
-                    const SizedBox(height: 10),
-                    Text(
-                      "Admin can login from here using: admin / admin",
-                      style: TextStyle(color: Colors.black.withOpacity(0.6)),
-                    ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
+
                     SizedBox(
                       height: 52,
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _login,
-                        child: const Text("Login"),
+                        onPressed: isLoading ? null : _login,
+                        child: isLoading
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : const Text("Login"),
                       ),
                     ),
+
                     const SizedBox(height: 10),
+
                     TextButton(
                       onPressed: () {
                         Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => RegisterPage(initialRole: role),
+                            builder: (_) =>
+                                RegisterPage(initialRole: selectedRole),
                           ),
                         );
                       },
@@ -117,7 +122,8 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Widget _roleToggle() {
-    final isPatient = role == UserRole.patient;
+    final isPatient = selectedRole == UserRole.patient;
+
     return Container(
       padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
@@ -130,14 +136,14 @@ class _LoginPageState extends State<LoginPage> {
             child: _seg(
               "Patient",
               isPatient,
-              () => setState(() => role = UserRole.patient),
+              () => setState(() => selectedRole = UserRole.patient),
             ),
           ),
           Expanded(
             child: _seg(
               "Doctor",
               !isPatient,
-              () => setState(() => role = UserRole.doctor),
+              () => setState(() => selectedRole = UserRole.doctor),
             ),
           ),
         ],
@@ -178,26 +184,73 @@ class _LoginPageState extends State<LoginPage> {
     );
   }
 
-  void _login() {
-    final ok = AuthStore.login(
-      email: emailCtrl.text,
-      password: passCtrl.text,
-      role: role,
-    );
+  Future<void> _login() async {
+    setState(() => isLoading = true);
 
-    if (!ok) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Invalid credentials")));
-      return;
+    try {
+      final userData = await FirebaseAuthService.login(
+        email: emailCtrl.text.trim(),
+        password: passCtrl.text.trim(),
+      );
+
+      if (userData == null) {
+        _showError("Invalid credentials");
+        setState(() => isLoading = false);
+        return;
+      }
+
+      final firestoreRole = userData['role'];
+      final isVerified = userData['isVerified'] ?? true;
+
+      // 🔒 Role mismatch
+      if ((selectedRole == UserRole.patient && firestoreRole != 'patient') ||
+          (selectedRole == UserRole.doctor && firestoreRole != 'doctor')) {
+        _showError("Please select correct login type");
+        setState(() => isLoading = false);
+        return;
+      }
+
+      // 🔒 Block unverified doctor
+      if (firestoreRole == 'doctor' && !isVerified) {
+        _showError("Your account is not verified by admin yet.");
+        setState(() => isLoading = false);
+        return;
+      }
+
+      final uid = FirebaseAuthService.currentUser!.uid;
+
+      // 🔔 Add login notification
+      await FirebaseFirestore.instance.collection('notifications').add({
+        'userId': uid,
+        'title': 'Login Successful',
+        'message': 'You have successfully logged in.',
+        'isRead': false,
+        'createdAt': Timestamp.now(),
+      });
+
+      if (!mounted) return;
+
+      if (firestoreRole == 'doctor') {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const DoctorShell()),
+        );
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const PatientShell()),
+        );
+      }
+    } catch (e) {
+      _showError("Login failed. Please try again.");
     }
 
-    NotificationStore.add("Welcome ✅", "Logged in successfully.");
+    if (mounted) {
+      setState(() => isLoading = false);
+    }
+  }
 
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const AuthGate()),
-      (_) => false,
-    );
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 }
