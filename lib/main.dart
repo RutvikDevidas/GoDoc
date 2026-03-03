@@ -1,21 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:firebase_core/firebase_core.dart';
-import 'firebase_options.dart';
 import 'core/theme/app_state.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/auth_gate.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   runApp(const GoDocApp());
 }
 
 class GoDocApp extends StatelessWidget {
   const GoDocApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(

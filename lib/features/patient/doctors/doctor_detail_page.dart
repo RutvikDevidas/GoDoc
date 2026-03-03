@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import '../appointments/appointment_booking_page.dart';
 
 class DoctorDetailPage extends StatelessWidget {
   final String doctorId;
@@ -9,159 +8,147 @@ class DoctorDetailPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser!.uid;
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text("Doctor Details"),
-        actions: [
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('saved_doctors')
-                .where('userId', isEqualTo: uid)
-                .where('doctorId', isEqualTo: doctorId)
-                .snapshots(),
-            builder: (context, snapshot) {
-              final isSaved =
-                  snapshot.hasData && snapshot.data!.docs.isNotEmpty;
-
-              return IconButton(
-                icon: Icon(
-                  isSaved ? Icons.favorite : Icons.favorite_border,
-                  color: Colors.red,
-                ),
-                onPressed: () async {
-                  if (isSaved) {
-                    await snapshot.data!.docs.first.reference.delete();
-                  } else {
-                    await FirebaseFirestore.instance
-                        .collection('saved_doctors')
-                        .add({
-                          'userId': uid,
-                          'doctorId': doctorId,
-                          'createdAt': Timestamp.now(),
-                        });
-                  }
-                },
-              );
-            },
-          ),
-        ],
-      ),
-      body: FutureBuilder<DocumentSnapshot>(
-        future: FirebaseFirestore.instance
-            .collection('doctors')
-            .doc(doctorId)
-            .get(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
-
-          if (!snapshot.data!.exists) {
-            return const Center(child: Text("Doctor not found"));
-          }
-
-          final data = snapshot.data!.data() as Map<String, dynamic>;
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      backgroundColor: const Color(0xFFB9F0C7),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // TOP IMAGE SECTION
+            Stack(
               children: [
-                // Profile Image
-                Center(
-                  child: CircleAvatar(
-                    radius: 60,
-                    backgroundImage: data['profileImage'] != null
-                        ? NetworkImage(data['profileImage'])
-                        : null,
-                    child: data['profileImage'] == null
-                        ? const Icon(Icons.person, size: 60)
-                        : null,
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(30),
+                  ),
+                  child: Image.network(
+                    "https://i.pravatar.cc/400?img=12",
+                    height: 260,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
                   ),
                 ),
-
-                const SizedBox(height: 16),
-
-                // Name + Verified Badge
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      data['name'] ?? '',
-                      style: const TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    if (data['isVerified'] == true)
-                      const Icon(Icons.verified, color: Colors.green, size: 20),
-                  ],
-                ),
-
-                const SizedBox(height: 8),
-
-                Center(
-                  child: Text(
-                    data['specialization'] ?? '',
-                    style: const TextStyle(fontSize: 14, color: Colors.grey),
+                Positioned(
+                  left: 10,
+                  top: 10,
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
                   ),
                 ),
-
-                const SizedBox(height: 24),
-
-                _infoTile("Clinic Name", data['clinicName'] ?? ''),
-                _infoTile("Clinic Address", data['clinicAddress'] ?? ''),
-                _infoTile("Experience", "${data['experience'] ?? ''} years"),
-                _infoTile("License No", data['licenseNo'] ?? ''),
-                _infoTile("PR Number", data['prNumber'] ?? ''),
-                _infoTile("KMC Number", data['kmcNumber'] ?? ''),
-
-                const SizedBox(height: 30),
-
-                // Book Appointment Button
-                SizedBox(
-                  width: double.infinity,
-                  height: 50,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2BB673),
-                    ),
-                    onPressed: () {
-                      // Next step: Appointment screen
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Appointment booking coming next 🚀"),
-                        ),
-                      );
-                    },
-                    child: const Text(
-                      "Book Appointment",
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
+                Positioned(
+                  right: 10,
+                  top: 10,
+                  child: const CircleAvatar(
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.favorite_border, color: Colors.red),
                   ),
                 ),
               ],
             ),
-          );
-        },
-      ),
-    );
-  }
 
-  Widget _infoTile(String title, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-          const SizedBox(height: 4),
-          Text(value),
-          const Divider(),
-        ],
+            Expanded(
+              child: Container(
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+                ),
+                child: ListView(
+                  children: [
+                    const Center(
+                      child: Text(
+                        "Dr. Ali Uzair",
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Center(
+                      child: Text(
+                        "Senior Cardiologist and Surgeon",
+                        style: TextStyle(color: Colors.grey),
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    // Rating
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(Icons.star, color: Colors.orange, size: 18),
+                        SizedBox(width: 4),
+                        Text("4.9 (96 reviews)"),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    const Text(
+                      "Clinic Address",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 8),
+
+                    Container(
+                      height: 120,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(15),
+                        image: const DecorationImage(
+                          image: NetworkImage(
+                            "https://maps.googleapis.com/maps/api/staticmap?center=London&zoom=13&size=600x300&maptype=roadmap",
+                          ),
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    const Text(
+                      "About Me",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      "Dr. Ali Uzair is the top most cardiologist specialist in Christ Hospital in London. He achieved several awards for heart related contribution.",
+                      style: TextStyle(color: Colors.grey),
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    // Book Button
+                    SizedBox(
+                      height: 50,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2BB673),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => const AppointmentBookingPage(),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          "Book Appointment",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

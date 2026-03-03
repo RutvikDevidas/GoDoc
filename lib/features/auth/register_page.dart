@@ -1,9 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_storage/firebase_storage.dart';
+// import 'package:firebase_auth/firebase_auth.dart';
+// import 'package:cloud_firestore/cloud_firestore.dart';
+// import 'package:firebase_storage/firebase_storage.dart';
 import '../../shared/models/user_role.dart';
 import '../patient/shell/patient_shell.dart';
 import '../doctor/shell/doctor_shell.dart';
@@ -228,6 +228,7 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+
     if (pickedImage == null || dob == null) {
       _showError("Complete all fields");
       return;
@@ -235,104 +236,26 @@ class _RegisterPageState extends State<RegisterPage> {
 
     setState(() => isLoading = true);
 
-    try {
-      final auth = FirebaseAuth.instance;
-      final firestore = FirebaseFirestore.instance;
-      final storage = FirebaseStorage.instance;
+    await Future.delayed(const Duration(seconds: 1)); // Fake loading
 
-      // Username check FIRST
-      if (role == UserRole.patient) {
-        final existing = await firestore
-            .collection('patients')
-            .where('username', isEqualTo: usernameCtrl.text.trim())
-            .get();
+    if (!mounted) return;
 
-        if (existing.docs.isNotEmpty) {
-          throw Exception("Username already exists");
-        }
-      }
-
-      final cred = await auth.createUserWithEmailAndPassword(
-        email: emailCtrl.text.trim(),
-        password: passwordCtrl.text.trim(),
+    // 🚀 Direct redirect (frontend only)
+    if (role == UserRole.patient) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const PatientShell()),
+        (_) => false,
       );
-
-      final uid = cred.user!.uid;
-
-      final ref = storage.ref().child('profile_images/$uid.jpg');
-
-      await ref.putFile(File(pickedImage!.path));
-
-      final imageUrl = await ref.getDownloadURL();
-
-      if (role == UserRole.patient) {
-        await firestore.collection('users').doc(uid).set({
-          'role': 'patient',
-          'isVerified': true,
-          'profileImage': imageUrl,
-          'createdAt': Timestamp.now(),
-        });
-
-        await firestore.collection('patients').doc(uid).set({
-          'name': nameCtrl.text,
-          'username': usernameCtrl.text,
-          'dob': Timestamp.fromDate(dob!),
-          'age': age,
-          'address': addressCtrl.text,
-          'email': emailCtrl.text,
-          'phone': phoneCtrl.text,
-        });
-      } else {
-        await firestore.collection('users').doc(uid).set({
-          'role': 'doctor',
-          'isVerified': false,
-          'profileImage': imageUrl,
-          'createdAt': Timestamp.now(),
-        });
-
-        await firestore.collection('doctors').doc(uid).set({
-          'name': nameCtrl.text,
-          'clinicName': clinicNameCtrl.text,
-          'address': addressCtrl.text,
-          'clinicAddress': clinicAddressCtrl.text,
-          'dob': Timestamp.fromDate(dob!),
-          'licenseNo': licenseCtrl.text,
-          'prNumber': prCtrl.text,
-          'specialization': specializationCtrl.text,
-          'experience': experienceCtrl.text,
-          'kmcNumber': kmcCtrl.text,
-          'isVerified': false,
-        });
-
-        await firestore.collection('doctor_verifications').doc(uid).set({
-          'status': 'pending',
-          'submittedAt': Timestamp.now(),
-        });
-      }
-
-      if (!mounted) return;
-
-      // 🚀 DIRECT REDIRECT TO HOME
-      if (role == UserRole.patient) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const PatientShell()),
-          (_) => false,
-        );
-      } else {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const DoctorShell()),
-          (_) => false,
-        );
-      }
-    } catch (e) {
-      _showError(e.toString());
+    } else {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const DoctorShell()),
+        (_) => false,
+      );
     }
 
-    if (mounted) {
-      setState(() => isLoading = false);
-    }
+    setState(() => isLoading = false);
   }
 
   void _showError(String msg) {

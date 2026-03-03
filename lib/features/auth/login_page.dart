@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../services/firebase_auth_service.dart';
+// import 'package:cloud_firestore/cloud_firestore.dart';
+// import '../../services/firebase_auth_service.dart';
 import '../../shared/models/user_role.dart';
 import '../doctor/shell/doctor_shell.dart';
 import '../patient/shell/patient_shell.dart';
@@ -185,71 +185,30 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _login() async {
-    if (emailCtrl.text.trim().isEmpty || passCtrl.text.trim().isEmpty) {
+    if (emailCtrl.text.isEmpty || passCtrl.text.isEmpty) {
       _showError("Please enter email and password");
       return;
     }
 
     setState(() => isLoading = true);
 
-    try {
-      final userData = await FirebaseAuthService.login(
-        email: emailCtrl.text.trim(),
-        password: passCtrl.text.trim(),
+    await Future.delayed(const Duration(seconds: 1)); // Fake loading
+
+    if (!mounted) return;
+
+    if (selectedRole == UserRole.doctor) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const DoctorShell()),
       );
-
-      if (userData == null) {
-        throw Exception("Invalid email or password");
-      }
-
-      final firestoreRole = userData['role'];
-      final isVerified = userData['isVerified'] ?? true;
-
-      // 🔒 Role mismatch check
-      if ((selectedRole == UserRole.patient && firestoreRole != 'patient') ||
-          (selectedRole == UserRole.doctor && firestoreRole != 'doctor')) {
-        throw Exception("Please select correct login type");
-      }
-
-      // 🔒 Block unverified doctor
-      if (firestoreRole == 'doctor' && isVerified == false) {
-        throw Exception("Your account is not verified by admin yet.");
-      }
-
-      final currentUser = FirebaseAuthService.currentUser;
-      if (currentUser == null) {
-        throw Exception("User session error. Please login again.");
-      }
-
-      // 🔔 Add login notification
-      await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': currentUser.uid,
-        'title': 'Login Successful',
-        'message': 'You have successfully logged in.',
-        'isRead': false,
-        'createdAt': Timestamp.now(),
-      });
-
-      if (!mounted) return;
-
-      if (firestoreRole == 'doctor') {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const DoctorShell()),
-        );
-      } else {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const PatientShell()),
-        );
-      }
-    } catch (e) {
-      _showError(e.toString().replaceAll("Exception: ", ""));
-    } finally {
-      if (mounted) {
-        setState(() => isLoading = false);
-      }
+    } else {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(builder: (_) => const PatientShell()),
+      );
     }
+
+    setState(() => isLoading = false);
   }
 
   void _showError(String msg) {

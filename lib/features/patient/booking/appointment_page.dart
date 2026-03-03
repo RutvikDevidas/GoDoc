@@ -1,155 +1,264 @@
 import 'package:flutter/material.dart';
-
-import '../../../shared/models/doctor.dart';
-import '../../../shared/widgets/app_image.dart';
-import '../../../shared/stores/notification_store.dart';
 import 'payment_page.dart';
 
 class AppointmentPage extends StatefulWidget {
-  final Doctor doctor;
-  const AppointmentPage({super.key, required this.doctor});
+  final String doctorName;
+  final String specialization;
+  final String imageUrl;
+
+  const AppointmentPage({
+    super.key,
+    required this.doctorName,
+    required this.specialization,
+    required this.imageUrl,
+  });
 
   @override
   State<AppointmentPage> createState() => _AppointmentPageState();
 }
 
 class _AppointmentPageState extends State<AppointmentPage> {
-  DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
+  int selectedDayIndex = 2;
   String selectedTime = "10:00 AM";
+  String consultationType = "Offline";
 
-  final times = const [
+  final List<String> days = ["Sun", "Mon", "Tue", "Wed", "Thu"];
+  final List<String> dates = ["3", "4", "5", "6", "7"];
+
+  final List<String> times = [
+    "9:00 AM",
+    "9:30 AM",
     "10:00 AM",
     "10:30 AM",
     "11:00 AM",
-    "11:30 AM",
-    "12:00 PM",
-    "05:00 PM",
-    "05:30 PM",
-    "06:00 PM",
   ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Book Appointment")),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFCCF4D2), Color(0xFFB9F0C7)],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: ListView(
-          padding: const EdgeInsets.all(16),
+      backgroundColor: const Color(0xFFB9F0C7),
+      body: SafeArea(
+        child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.9),
-                borderRadius: BorderRadius.circular(18),
-              ),
-              child: Row(
-                children: [
-                  AppImage(
-                    pathOrUrl: widget.doctor.imageUrl,
-                    width: 70,
-                    height: 70,
-                    radius: 14,
+            // 🔝 Doctor Image
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(
+                    bottom: Radius.circular(30),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          widget.doctor.name,
-                          style: const TextStyle(fontWeight: FontWeight.w900),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          widget.doctor.title,
-                          style: TextStyle(
-                            color: Colors.black.withOpacity(0.65),
-                          ),
-                        ),
-                      ],
-                    ),
+                  child: Image.network(
+                    widget.imageUrl,
+                    height: 220,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
                   ),
-                ],
-              ),
+                ),
+                Positioned(
+                  left: 10,
+                  top: 10,
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+              ],
             ),
 
-            const SizedBox(height: 14),
-            _sectionTitle("Select Date"),
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: selectedDate,
-                  firstDate: DateTime.now(),
-                  lastDate: DateTime.now().add(const Duration(days: 60)),
-                );
-                if (picked != null) setState(() => selectedDate = picked);
-              },
-              borderRadius: BorderRadius.circular(16),
+            Expanded(
               child: Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
-                  borderRadius: BorderRadius.circular(16),
+                padding: const EdgeInsets.all(20),
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
                 ),
-                child: Row(
+                child: ListView(
                   children: [
-                    const Icon(Icons.calendar_month),
-                    const SizedBox(width: 10),
-                    Text(
-                      "${selectedDate.year}-${selectedDate.month.toString().padLeft(2, "0")}-${selectedDate.day.toString().padLeft(2, "0")}",
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    Center(
+                      child: Text(
+                        widget.doctorName,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Center(
+                      child: Text(
+                        widget.specialization,
+                        style: const TextStyle(color: Colors.grey),
+                      ),
+                    ),
+
+                    const SizedBox(height: 20),
+
+                    const Text(
+                      "Appointment",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+
+                    const SizedBox(height: 15),
+
+                    // 📅 Day Selector
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: List.generate(days.length, (index) {
+                        final isSelected = selectedDayIndex == index;
+
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              selectedDayIndex = index;
+                            });
+                          },
+                          child: Container(
+                            width: 55,
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(0xFF2BB673)
+                                  : Colors.grey.shade200,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Column(
+                              children: [
+                                Text(
+                                  days[index],
+                                  style: TextStyle(
+                                    color: isSelected
+                                        ? Colors.white
+                                        : Colors.black,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  dates[index],
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: isSelected
+                                        ? Colors.white
+                                        : Colors.black,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+
+                    const SizedBox(height: 25),
+
+                    const Text(
+                      "Available Time",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: times.map((time) {
+                        final isSelected = selectedTime == time;
+
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              selectedTime = time;
+                            });
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 8,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isSelected
+                                  ? const Color(0xFF2BB673)
+                                  : Colors.grey.shade200,
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              time,
+                              style: TextStyle(
+                                color: isSelected ? Colors.white : Colors.black,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 25),
+
+                    const Text(
+                      "Consultation Type",
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
+
+                    Row(
+                      children: [
+                        Radio(
+                          value: "Offline",
+                          groupValue: consultationType,
+                          activeColor: const Color(0xFF2BB673),
+                          onChanged: (value) {
+                            setState(() {
+                              consultationType = value.toString();
+                            });
+                          },
+                        ),
+                        const Text("Offline"),
+                        const SizedBox(width: 20),
+                        Radio(
+                          value: "Online",
+                          groupValue: consultationType,
+                          activeColor: const Color(0xFF2BB673),
+                          onChanged: (value) {
+                            setState(() {
+                              consultationType = value.toString();
+                            });
+                          },
+                        ),
+                        const Text("Online"),
+                      ],
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    SizedBox(
+                      height: 50,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2BB673),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => PaymentPage(
+                                doctorName: widget.doctorName,
+                                date:
+                                    "${days[selectedDayIndex]} ${dates[selectedDayIndex]}",
+                                time: selectedTime,
+                                type: consultationType,
+                              ),
+                            ),
+                          );
+                        },
+                        child: const Text(
+                          "Proceed to Payment",
+                          style: TextStyle(fontWeight: FontWeight.bold),
+                        ),
+                      ),
                     ),
                   ],
                 ),
-              ),
-            ),
-
-            const SizedBox(height: 14),
-            _sectionTitle("Select Time"),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: times.map((t) {
-                final selected = selectedTime == t;
-                return ChoiceChip(
-                  label: Text(t),
-                  selected: selected,
-                  onSelected: (_) => setState(() => selectedTime = t),
-                );
-              }).toList(),
-            ),
-
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 52,
-              child: ElevatedButton(
-                onPressed: () {
-                  NotificationStore.add(
-                    "Booking Started",
-                    "Proceed to payment to confirm appointment.",
-                  );
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PaymentPage(
-                        doctor: widget.doctor,
-                        date: selectedDate,
-                        time: selectedTime,
-                      ),
-                    ),
-                  );
-                },
-                child: const Text("Proceed to Payment"),
               ),
             ),
           ],
@@ -157,9 +266,4 @@ class _AppointmentPageState extends State<AppointmentPage> {
       ),
     );
   }
-
-  Widget _sectionTitle(String t) => Text(
-    t,
-    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
-  );
 }

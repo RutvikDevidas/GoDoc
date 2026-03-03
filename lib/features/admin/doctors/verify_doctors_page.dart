@@ -1,98 +1,77 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
-class VerifyDoctorsPage extends StatelessWidget {
+class VerifyDoctorsPage extends StatefulWidget {
   const VerifyDoctorsPage({super.key});
+
+  @override
+  State<VerifyDoctorsPage> createState() => _VerifyDoctorsPageState();
+}
+
+class _VerifyDoctorsPageState extends State<VerifyDoctorsPage> {
+  // 🩺 Dummy pending verification requests
+  List<Map<String, String>> pendingDoctors = [
+    {"uid": "D001", "name": "Dr. Rahul Sharma"},
+    {"uid": "D002", "name": "Dr. Priya Naik"},
+    {"uid": "D003", "name": "Dr. Amit Verma"},
+  ];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Doctor Verification")),
-      body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('doctor_verifications')
-            .where('status', isEqualTo: 'pending')
-            .snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: pendingDoctors.isEmpty
+          ? const Center(child: Text("No pending requests"))
+          : ListView.builder(
+              itemCount: pendingDoctors.length,
+              itemBuilder: (context, index) {
+                final doctor = pendingDoctors[index];
 
-          final docs = snapshot.data!.docs;
-
-          if (docs.isEmpty) {
-            return const Center(child: Text("No pending requests"));
-          }
-
-          return ListView.builder(
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final uid = doc.id;
-
-              return Card(
-                margin: const EdgeInsets.all(10),
-                child: ListTile(
-                  title: Text("Doctor ID: $uid"),
-                  subtitle: const Text("Pending verification"),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.check, color: Colors.green),
-                        onPressed: () => approveDoctor(uid),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.red),
-                        onPressed: () => rejectDoctor(uid),
-                      ),
-                    ],
+                return Card(
+                  margin: const EdgeInsets.all(10),
+                  child: ListTile(
+                    title: Text(doctor["name"]!),
+                    subtitle: Text("Doctor ID: ${doctor["uid"]}"),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.check, color: Colors.green),
+                          onPressed: () => approveDoctor(index),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.red),
+                          onPressed: () => rejectDoctor(index),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              );
-            },
-          );
-        },
-      ),
+                );
+              },
+            ),
     );
   }
 
-  Future<void> approveDoctor(String uid) async {
-    await FirebaseFirestore.instance.collection('users').doc(uid).update({
-      'isVerified': true,
+  void approveDoctor(int index) {
+    final name = pendingDoctors[index]["name"];
+
+    setState(() {
+      pendingDoctors.removeAt(index);
     });
 
-    await FirebaseFirestore.instance.collection('doctors').doc(uid).update({
-      'isVerified': true,
-    });
-
-    await FirebaseFirestore.instance
-        .collection('doctor_verifications')
-        .doc(uid)
-        .update({'status': 'approved'});
-
-    // Send notification
-    await FirebaseFirestore.instance.collection('notifications').add({
-      'userId': uid,
-      'title': 'Verification Approved',
-      'message': 'Your account has been approved by admin.',
-      'isRead': false,
-      'createdAt': Timestamp.now(),
-    });
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("$name approved successfully")));
   }
 
-  Future<void> rejectDoctor(String uid) async {
-    await FirebaseFirestore.instance
-        .collection('doctor_verifications')
-        .doc(uid)
-        .update({'status': 'rejected'});
+  void rejectDoctor(int index) {
+    final name = pendingDoctors[index]["name"];
 
-    await FirebaseFirestore.instance.collection('notifications').add({
-      'userId': uid,
-      'title': 'Verification Rejected',
-      'message': 'Your verification request was rejected.',
-      'isRead': false,
-      'createdAt': Timestamp.now(),
+    setState(() {
+      pendingDoctors.removeAt(index);
     });
+
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text("$name rejected")));
   }
 }
