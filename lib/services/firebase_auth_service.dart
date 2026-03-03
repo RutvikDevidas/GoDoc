@@ -10,18 +10,22 @@ class FirebaseAuthService {
     required String email,
     required String password,
   }) async {
-    final cred = await _auth.signInWithEmailAndPassword(
-      email: email,
-      password: password,
-    );
+    try {
+      final cred = await _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
 
-    final uid = cred.user!.uid;
+      final uid = cred.user!.uid;
 
-    final userDoc = await _firestore.collection('users').doc(uid).get();
+      final userDoc = await _firestore.collection('users').doc(uid).get();
 
-    if (!userDoc.exists) return null;
+      if (!userDoc.exists) return null;
 
-    return userDoc.data();
+      return userDoc.data();
+    } on FirebaseAuthException catch (e) {
+      throw Exception(e.message ?? "Login failed");
+    }
   }
 
   // ---------------- LOGOUT ----------------

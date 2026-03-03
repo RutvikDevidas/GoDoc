@@ -185,6 +185,11 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> _login() async {
+    if (emailCtrl.text.trim().isEmpty || passCtrl.text.trim().isEmpty) {
+      _showError("Please enter email and password");
+      return;
+    }
+
     setState(() => isLoading = true);
 
     try {
@@ -194,34 +199,31 @@ class _LoginPageState extends State<LoginPage> {
       );
 
       if (userData == null) {
-        _showError("Invalid credentials");
-        setState(() => isLoading = false);
-        return;
+        throw Exception("Invalid email or password");
       }
 
       final firestoreRole = userData['role'];
       final isVerified = userData['isVerified'] ?? true;
 
-      // 🔒 Role mismatch
+      // 🔒 Role mismatch check
       if ((selectedRole == UserRole.patient && firestoreRole != 'patient') ||
           (selectedRole == UserRole.doctor && firestoreRole != 'doctor')) {
-        _showError("Please select correct login type");
-        setState(() => isLoading = false);
-        return;
+        throw Exception("Please select correct login type");
       }
 
       // 🔒 Block unverified doctor
-      if (firestoreRole == 'doctor' && !isVerified) {
-        _showError("Your account is not verified by admin yet.");
-        setState(() => isLoading = false);
-        return;
+      if (firestoreRole == 'doctor' && isVerified == false) {
+        throw Exception("Your account is not verified by admin yet.");
       }
 
-      final uid = FirebaseAuthService.currentUser!.uid;
+      final currentUser = FirebaseAuthService.currentUser;
+      if (currentUser == null) {
+        throw Exception("User session error. Please login again.");
+      }
 
       // 🔔 Add login notification
       await FirebaseFirestore.instance.collection('notifications').add({
-        'userId': uid,
+        'userId': currentUser.uid,
         'title': 'Login Successful',
         'message': 'You have successfully logged in.',
         'isRead': false,
@@ -242,11 +244,11 @@ class _LoginPageState extends State<LoginPage> {
         );
       }
     } catch (e) {
-      _showError("Login failed. Please try again.");
-    }
-
-    if (mounted) {
-      setState(() => isLoading = false);
+      _showError(e.toString().replaceAll("Exception: ", ""));
+    } finally {
+      if (mounted) {
+        setState(() => isLoading = false);
+      }
     }
   }
 

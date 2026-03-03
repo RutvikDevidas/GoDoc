@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../../shared/models/user_role.dart';
+import '../patient/shell/patient_shell.dart';
+import '../doctor/shell/doctor_shell.dart';
 
 class RegisterPage extends StatefulWidget {
   final UserRole initialRole;
@@ -36,7 +38,8 @@ class _RegisterPageState extends State<RegisterPage> {
   final kmcCtrl = TextEditingController();
 
   DateTime? dob;
-  File? profileImage;
+  XFile? pickedImage;
+  bool isLoading = false;
 
   @override
   void initState() {
@@ -44,10 +47,28 @@ class _RegisterPageState extends State<RegisterPage> {
     role = widget.initialRole;
   }
 
+  @override
+  void dispose() {
+    nameCtrl.dispose();
+    usernameCtrl.dispose();
+    addressCtrl.dispose();
+    emailCtrl.dispose();
+    phoneCtrl.dispose();
+    passwordCtrl.dispose();
+    clinicNameCtrl.dispose();
+    clinicAddressCtrl.dispose();
+    licenseCtrl.dispose();
+    prCtrl.dispose();
+    specializationCtrl.dispose();
+    experienceCtrl.dispose();
+    kmcCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> pickImage() async {
-    final picked = await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked != null) {
-      setState(() => profileImage = File(picked.path));
+    final image = await ImagePicker().pickImage(source: ImageSource.gallery);
+    if (image != null) {
+      setState(() => pickedImage = image);
     }
   }
 
@@ -79,23 +100,37 @@ class _RegisterPageState extends State<RegisterPage> {
             children: [
               _roleToggle(),
               const SizedBox(height: 16),
+
               GestureDetector(
                 onTap: pickImage,
                 child: CircleAvatar(
                   radius: 50,
-                  backgroundImage: profileImage != null
-                      ? FileImage(profileImage!)
+                  backgroundImage: pickedImage != null
+                      ? FileImage(File(pickedImage!.path))
                       : null,
-                  child: profileImage == null
+                  child: pickedImage == null
                       ? const Icon(Icons.camera_alt)
                       : null,
                 ),
               ),
+
               const SizedBox(height: 20),
+
               if (isPatient) _patientFields(),
               if (!isPatient) _doctorFields(),
+
               const SizedBox(height: 20),
-              ElevatedButton(onPressed: _submit, child: const Text("Register")),
+
+              SizedBox(
+                width: double.infinity,
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: isLoading ? null : _submit,
+                  child: isLoading
+                      ? const CircularProgressIndicator(color: Colors.white)
+                      : const Text("Register"),
+                ),
+              ),
             ],
           ),
         ),
@@ -135,11 +170,7 @@ class _RegisterPageState extends State<RegisterPage> {
         _field(emailCtrl, "Email"),
         _field(phoneCtrl, "Phone"),
         _dateField(),
-        if (dob != null)
-          Text(
-            "Age: $age years",
-            style: const TextStyle(fontWeight: FontWeight.bold),
-          ),
+        if (dob != null) Text("Age: $age years"),
         _field(passwordCtrl, "Password", obscure: true),
       ],
     );
@@ -197,34 +228,20 @@ class _RegisterPageState extends State<RegisterPage> {
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
-
-    if (profileImage == null || dob == null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Complete all fields")));
+    if (pickedImage == null || dob == null) {
+      _showError("Complete all fields");
       return;
     }
+
+    setState(() => isLoading = true);
 
     try {
       final auth = FirebaseAuth.instance;
       final firestore = FirebaseFirestore.instance;
       final storage = FirebaseStorage.instance;
 
-      // Create Auth account
-      final cred = await auth.createUserWithEmailAndPassword(
-        email: emailCtrl.text.trim(),
-        password: passwordCtrl.text.trim(),
-      );
-
-      final uid = cred.user!.uid;
-
-      // Upload image
-      final ref = storage.ref().child('profile_images/$uid.jpg');
-      await ref.putFile(profileImage!);
-      final imageUrl = await ref.getDownloadURL();
-
+      // Username check FIRST
       if (role == UserRole.patient) {
-        // Unique username check
         final existing = await firestore
             .collection('patients')
             .where('username', isEqualTo: usernameCtrl.text.trim())
@@ -233,7 +250,22 @@ class _RegisterPageState extends State<RegisterPage> {
         if (existing.docs.isNotEmpty) {
           throw Exception("Username already exists");
         }
+      }
 
+      final cred = await auth.createUserWithEmailAndPassword(
+        email: emailCtrl.text.trim(),
+        password: passwordCtrl.text.trim(),
+      );
+
+      final uid = cred.user!.uid;
+
+      final ref = storage.ref().child('profile_images/$uid.jpg');
+
+      await ref.putFile(File(pickedImage!.path));
+
+      final imageUrl = await ref.getDownloadURL();
+
+      if (role == UserRole.patient) {
         await firestore.collection('users').doc(uid).set({
           'role': 'patient',
           'isVerified': true,
@@ -244,7 +276,7 @@ class _RegisterPageState extends State<RegisterPage> {
         await firestore.collection('patients').doc(uid).set({
           'name': nameCtrl.text,
           'username': usernameCtrl.text,
-          'dob': dob,
+          'dob': Timestamp.fromDate(dob!),
           'age': age,
           'address': addressCtrl.text,
           'email': emailCtrl.text,
@@ -263,7 +295,7 @@ class _RegisterPageState extends State<RegisterPage> {
           'clinicName': clinicNameCtrl.text,
           'address': addressCtrl.text,
           'clinicAddress': clinicAddressCtrl.text,
-          'dob': dob,
+          'dob': Timestamp.fromDate(dob!),
           'licenseNo': licenseCtrl.text,
           'prNumber': prCtrl.text,
           'specialization': specializationCtrl.text,
@@ -278,15 +310,32 @@ class _RegisterPageState extends State<RegisterPage> {
         });
       }
 
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Registration successful")));
+      if (!mounted) return;
 
-      Navigator.pop(context);
+      // 🚀 DIRECT REDIRECT TO HOME
+      if (role == UserRole.patient) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const PatientShell()),
+          (_) => false,
+        );
+      } else {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const DoctorShell()),
+          (_) => false,
+        );
+      }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(e.toString())));
+      _showError(e.toString());
     }
+
+    if (mounted) {
+      setState(() => isLoading = false);
+    }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 }
