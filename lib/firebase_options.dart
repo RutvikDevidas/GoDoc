@@ -69,21 +69,21 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyA7d3gRu3nP7k3k2iSqbT7fy9ZHBkpkRN8',
-    appId: '1:298580599577:web:fc315e25ac7124fc1d1b88',
-    messagingSenderId: '298580599577',
-    projectId: 'godoc-4d7a8',
-    authDomain: 'godoc-4d7a8.firebaseapp.com',
-    storageBucket: 'godoc-4d7a8.firebasestorage.app',
-    measurementId: 'G-KWX327CLDZ',
+    apiKey: 'AIzaSyAA3VW0UqeuUZQZ0Bb2qYZ2P8CgrkGRH7w',
+    appId: '1:462494703240:web:80606446570f9a8868493d',
+    messagingSenderId: '462494703240',
+    projectId: 'godoc-4cfc9',
+    authDomain: 'godoc-4cfc9.firebaseapp.com',
+    storageBucket: 'godoc-4cfc9.firebasestorage.app',
+    measurementId: 'G-WCN7K7YLQF',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDFfnc5VXosHvY3tp3pBgXxdndP9s6hGak',
-    appId: '1:206537940834:android:97a66bc52f88dc11d5d63b',
-    messagingSenderId: '206537940834',
-    projectId: 'project-c19ca',
-    storageBucket: 'project-c19ca.firebasestorage.app',
+    apiKey: 'AIzaSyCJMiOlrBnU4xJ7pGA0WQyEwtza9TfnTaI',
+    appId: '1:462494703240:android:ef9088e754f6087a68493d',
+    messagingSenderId: '462494703240',
+    projectId: 'godoc-4cfc9',
+    storageBucket: 'godoc-4cfc9.firebasestorage.app',
   );
 
   static const FirebaseOptions ios = FirebaseOptions(
@@ -96,13 +96,13 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions windows = FirebaseOptions(
-    apiKey: 'AIzaSyA7d3gRu3nP7k3k2iSqbT7fy9ZHBkpkRN8',
-    appId: '1:298580599577:web:8d6c6f6db0210c1e1d1b88',
-    messagingSenderId: '298580599577',
-    projectId: 'godoc-4d7a8',
-    authDomain: 'godoc-4d7a8.firebaseapp.com',
-    storageBucket: 'godoc-4d7a8.firebasestorage.app',
-    measurementId: 'G-CPRDYHSE89',
+    apiKey: 'AIzaSyAA3VW0UqeuUZQZ0Bb2qYZ2P8CgrkGRH7w',
+    appId: '1:462494703240:web:71f583ef7c2edae368493d',
+    messagingSenderId: '462494703240',
+    projectId: 'godoc-4cfc9',
+    authDomain: 'godoc-4cfc9.firebaseapp.com',
+    storageBucket: 'godoc-4cfc9.firebasestorage.app',
+    measurementId: 'G-JJYVPVCGX3',
   );
 
   static const FirebaseOptions linux = FirebaseOptions(

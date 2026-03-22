@@ -20,15 +20,21 @@ Future<void> bootstrapFirebase() async {
     await Firebase.initializeApp(options: options);
     firebaseAvailable = true;
     firebaseUnavailableReason = null;
-
-    // Seed local app state into Firestore (if empty) and keep app state in sync.
-    await FirestoreDataService.instance.seedAndSync();
     debugPrint(
       'Firebase initialized successfully on ${DefaultFirebaseOptions.currentPlatformName}.',
     );
+
+    try {
+      // Seed local app state into Firestore (if empty) and keep app state in sync.
+      await FirestoreDataService.instance.seedAndSync();
+    } catch (error) {
+      firebaseAvailable = false;
+      firebaseUnavailableReason = 'Firestore sync failed: $error';
+      debugPrint('Firestore sync failed: $error');
+    }
   } catch (error) {
     firebaseAvailable = false;
-    firebaseUnavailableReason = error.toString();
+    firebaseUnavailableReason = 'Firebase initialization failed: $error';
     debugPrint('Firebase initialization failed: $firebaseUnavailableReason');
   }
 }

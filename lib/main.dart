@@ -6,6 +6,7 @@ import 'modules/auth/unified_login_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await bootstrapFirebase();
   runApp(const GoDocApp());
 }
 
@@ -30,35 +31,8 @@ class _AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<_AppShell> {
-  bool _bootstrapCompleted = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _startBootstrap();
-  }
-
-  Future<void> _startBootstrap() async {
-    await bootstrapFirebase();
-    if (!mounted) return;
-    setState(() {
-      _bootstrapCompleted = true;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      children: [
-        const UnifiedLoginScreen(),
-        if (!_bootstrapCompleted)
-          const Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: LinearProgressIndicator(minHeight: 2),
-          ),
-      ],
-    );
+    return const UnifiedLoginScreen();
   }
 }

@@ -9,6 +9,8 @@ import '../../core/firebase/firestore_data_service.dart';
 import '../../core/firebase/firebase_state.dart';
 import '../../models/patient_model.dart';
 import '../auth/unified_login_screen.dart';
+import 'patient_home_screen.dart';
+import 'dart:developer' show log;
 
 class PatientRegistrationScreen extends StatefulWidget {
   const PatientRegistrationScreen({super.key});
@@ -34,6 +36,7 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
   final phone = TextEditingController();
 
   String? profileImageData;
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -73,51 +76,78 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
   Future<void> _register() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final patient = PatientModel(
-      username: username.text.trim(),
-      password: password.text.trim(),
-      name: name.text.trim(),
-      dob: dob.text.trim(),
-      address: address.text.trim(),
-      email: email.text.trim(),
-      phone: phone.text.trim(),
-      profileImageData: profileImageData,
-    );
-
-    final usernameTaken = await FirestoreDataService.instance.usernameExists(
-      patient.username,
-    );
-    if (usernameTaken) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Username already exists. Try another one.")),
-      );
-      return;
-    }
+    setState(() => _isLoading = true);
 
     try {
-      await FirestoreDataService.instance.savePatient(patient);
-      await FirestoreDataService.instance.syncAllToAppState();
-    } catch (error) {
-      AppState.patients.add(patient);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              "Saved locally only. ${firebaseUnavailableReason ?? error.toString()}",
+      final patient = PatientModel(
+        username: username.text.trim(),
+        password: password.text.trim(),
+        name: name.text.trim(),
+        dob: dob.text.trim(),
+        address: address.text.trim(),
+        email: email.text.trim(),
+        phone: phone.text.trim(),
+        profileImageData: profileImageData,
+      );
+
+      try {
+        final usernameTaken = await FirestoreDataService.instance
+            .usernameExists(patient.username);
+        if (usernameTaken) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Username already exists. Try another one."),
             ),
-          ),
-        );
+          );
+          setState(() => _isLoading = false);
+          return;
+        }
+      } catch (error) {
+        // If Firebase is unavailable, continue with local save
+        print('Error checking username: $error');
+      }
+
+      try {
+        await FirestoreDataService.instance.savePatient(patient);
+        await FirestoreDataService.instance.syncAllToAppState();
+      } catch (error) {
+        print('Error saving to Firebase: $error');
+        AppState.patients.add(patient);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text("Saved locally. ${error.toString()}")),
+          );
+        }
+      }
+
+      if (!mounted) return;
+
+      final patient2 = PatientModel(
+        username: username.text.trim(),
+        password: password.text.trim(),
+        name: name.text.trim(),
+        dob: dob.text.trim(),
+        address: address.text.trim(),
+        email: email.text.trim(),
+        phone: phone.text.trim(),
+        profileImageData: profileImageData,
+      );
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => PatientHomeScreen(patient: patient2)),
+        (route) => false,
+      );
+    } catch (error) {
+      print('Unexpected error in registration: $error');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Error: ${error.toString()}")));
+        setState(() => _isLoading = false);
       }
     }
-
-    if (!mounted) return;
-
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const UnifiedLoginScreen()),
-      (route) => false,
-    );
   }
 
   @override
@@ -188,7 +218,8 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
                           email,
                           "Email",
                           keyboardType: TextInputType.emailAddress,
-                          extraValidator: (value) => _emailPattern.hasMatch(value)
+                          extraValidator: (value) =>
+                              _emailPattern.hasMatch(value)
                               ? null
                               : "Enter a valid email",
                         ),
@@ -196,7 +227,8 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
                           phone,
                           "Phone number",
                           keyboardType: TextInputType.phone,
-                          extraValidator: (value) => _phonePattern.hasMatch(value)
+                          extraValidator: (value) =>
+                              _phonePattern.hasMatch(value)
                               ? null
                               : "Enter a valid phone number",
                         ),
@@ -213,7 +245,8 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
                         _buildField(
                           username,
                           "Username",
-                          extraValidator: (value) => _usernamePattern.hasMatch(value)
+                          extraValidator: (value) =>
+                              _usernamePattern.hasMatch(value)
                               ? null
                               : "Use 4-20 letters, numbers, or _",
                         ),
@@ -227,8 +260,16 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
                         ),
                         const SizedBox(height: 10),
                         ElevatedButton(
-                          onPressed: _register,
-                          child: const Text("Create patient account"),
+                          onPressed: _isLoading ? null : _register,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  height: 20,
+                                  width: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Text("Create patient account"),
                         ),
                       ],
                     ),
@@ -304,10 +345,7 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
           if (trimmed.isEmpty) return "Required";
           return extraValidator?.call(trimmed);
         },
-        decoration: InputDecoration(
-          labelText: label,
-          suffixIcon: suffixIcon,
-        ),
+        decoration: InputDecoration(labelText: label, suffixIcon: suffixIcon),
       ),
     );
   }

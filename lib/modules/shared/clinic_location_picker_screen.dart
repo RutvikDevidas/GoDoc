@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 /// Result returned when a clinic location is picked on the map.
 class ClinicLocationResult {
@@ -39,6 +41,8 @@ class ClinicLocationPickerScreen extends StatefulWidget {
 class _ClinicLocationPickerScreenState
     extends State<ClinicLocationPickerScreen> {
   final Completer<GoogleMapController> _controller = Completer();
+  final TextEditingController _latitudeController = TextEditingController();
+  final TextEditingController _longitudeController = TextEditingController();
 
   LatLng? _pickedLocation;
   String? _pickedAddress;
@@ -54,14 +58,34 @@ class _ClinicLocationPickerScreenState
         widget.initialLatitude!,
         widget.initialLongitude!,
       );
+      _latitudeController.text = widget.initialLatitude!.toString();
+      _longitudeController.text = widget.initialLongitude!.toString();
     }
-    _initMap();
+    if (_supportsEmbeddedMap) {
+      _initMap();
+    } else {
+      _loading = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _latitudeController.dispose();
+    _longitudeController.dispose();
+    super.dispose();
   }
 
   Future<void> _initMap() async {
     try {
       final cameraPosition = await _getInitialCameraPosition();
-      final controller = await _controller.future;
+      final controller = await _controller.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw Exception(
+            'Google Maps did not initialize. Check your Maps API key and platform support.',
+          );
+        },
+      );
       controller.moveCamera(CameraUpdate.newCameraPosition(cameraPosition));
       setState(() {
         _loading = false;
@@ -150,6 +174,8 @@ class _ClinicLocationPickerScreenState
     setState(() {
       _pickedLocation = position;
       _pickedAddress = null;
+      _latitudeController.text = position.latitude.toString();
+      _longitudeController.text = position.longitude.toString();
     });
 
     await _reverseGeocode(position);
@@ -159,6 +185,22 @@ class _ClinicLocationPickerScreenState
   }
 
   void _confirmSelection() {
+    if (!_supportsEmbeddedMap) {
+      final latitude = double.tryParse(_latitudeController.text.trim());
+      final longitude = double.tryParse(_longitudeController.text.trim());
+
+      if (latitude == null || longitude == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Enter valid latitude and longitude values.'),
+          ),
+        );
+        return;
+      }
+
+      _pickedLocation = LatLng(latitude, longitude);
+    }
+
     if (_pickedLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a location on the map.')),
@@ -173,6 +215,93 @@ class _ClinicLocationPickerScreenState
         address:
             _pickedAddress ??
             '${_pickedLocation!.latitude.toStringAsFixed(6)}, ${_pickedLocation!.longitude.toStringAsFixed(6)}',
+        ),
+    );
+  }
+
+  bool get _supportsEmbeddedMap {
+    if (kIsWeb) return true;
+
+    return switch (defaultTargetPlatform) {
+      TargetPlatform.android || TargetPlatform.iOS => true,
+      _ => false,
+    };
+  }
+
+  Future<void> _openInGoogleMaps() async {
+    final query = widget.initialAddress?.trim().isNotEmpty == true
+        ? widget.initialAddress!.trim()
+        : _pickedAddress?.trim();
+    final latitude = _latitudeController.text.trim();
+    final longitude = _longitudeController.text.trim();
+
+    Uri uri;
+    if (latitude.isNotEmpty && longitude.isNotEmpty) {
+      uri = Uri.parse(
+        'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
+      );
+    } else if (query != null && query.isNotEmpty) {
+      uri = Uri.https('www.google.com', '/maps/search/', {
+        'api': '1',
+        'query': query,
+      });
+    } else {
+      uri = Uri.parse('https://www.google.com/maps');
+    }
+
+    final launched = await launchUrl(
+      uri,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Unable to open Google Maps.')),
+      );
+    }
+  }
+
+  Widget _buildDesktopFallback() {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.map_outlined, size: 36),
+          const SizedBox(height: 16),
+          const Text(
+            'Embedded Google Maps is available on Android, iOS, and web in this app.',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'On desktop, open Google Maps in your browser, copy the clinic coordinates, then paste them here.',
+            style: TextStyle(height: 1.5),
+          ),
+          const SizedBox(height: 20),
+          OutlinedButton.icon(
+            onPressed: _openInGoogleMaps,
+            icon: const Icon(Icons.open_in_new_rounded),
+            label: const Text('Open Google Maps'),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            controller: _latitudeController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Latitude'),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _longitudeController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Longitude'),
+          ),
+          const SizedBox(height: 12),
+          if (_pickedAddress != null)
+            Text(
+              _pickedAddress!,
+              style: const TextStyle(color: Colors.black54),
+            ),
+        ],
       ),
     );
   }
@@ -184,57 +313,82 @@ class _ClinicLocationPickerScreenState
       body: Column(
         children: [
           Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: GoogleMap(
-                    initialCameraPosition: const CameraPosition(
-                      target: LatLng(0, 0),
-                      zoom: 2,
-                    ),
-                    myLocationEnabled: true,
-                    myLocationButtonEnabled: true,
-                    onMapCreated: (controller) {
-                      if (!_controller.isCompleted) {
-                        _controller.complete(controller);
-                      }
-                    },
-                    markers: _pickedLocation == null
-                        ? const {}
-                        : {
-                            Marker(
-                              markerId: const MarkerId('clinic'),
-                              position: _pickedLocation!,
-                            ),
-                          },
-                    onTap: _onMapTap,
-                  ),
-                ),
-                if (_loading)
-                  const Positioned.fill(
-                    child: ColoredBox(
-                      color: Colors.black26,
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  ),
-                if (_error != null)
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.black54,
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24.0),
-                          child: Text(
-                            _error!,
-                            style: const TextStyle(color: Colors.white),
-                            textAlign: TextAlign.center,
+            child: _supportsEmbeddedMap
+                ? Stack(
+                    children: [
+                      Positioned.fill(
+                        child: GoogleMap(
+                          initialCameraPosition: const CameraPosition(
+                            target: LatLng(0, 0),
+                            zoom: 2,
                           ),
+                          myLocationEnabled: true,
+                          myLocationButtonEnabled: true,
+                          onMapCreated: (controller) {
+                            if (!_controller.isCompleted) {
+                              _controller.complete(controller);
+                            }
+                          },
+                          markers: _pickedLocation == null
+                              ? const {}
+                              : {
+                                  Marker(
+                                    markerId: const MarkerId('clinic'),
+                                    position: _pickedLocation!,
+                                  ),
+                                },
+                          onTap: _onMapTap,
                         ),
                       ),
-                    ),
-                  ),
-              ],
-            ),
+                      if (_loading)
+                        const Positioned.fill(
+                          child: ColoredBox(
+                            color: Colors.black26,
+                            child: Center(child: CircularProgressIndicator()),
+                          ),
+                        ),
+                      if (_error != null)
+                        Positioned.fill(
+                          child: Container(
+                            color: Colors.black54,
+                            child: Center(
+                              child: Padding(
+                                padding: const EdgeInsets.all(24.0),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(
+                                      Icons.error,
+                                      color: Colors.white,
+                                      size: 48,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      _error!,
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 16,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 16),
+                                    const Text(
+                                      'Check the Maps API key in AndroidManifest.xml or Info.plist if the map stays blank.',
+                                      style: TextStyle(
+                                        color: Colors.yellow,
+                                        fontSize: 12,
+                                      ),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  )
+                : _buildDesktopFallback(),
           ),
           Container(
             width: double.infinity,

@@ -44,7 +44,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   final clinicAddress = TextEditingController();
   final _usernamePattern = RegExp(r'^[a-zA-Z0-9_]{4,20}$');
   final _phonePattern = RegExp(r'^[0-9]{7,15}$');
-  final _credentialPattern = RegExp(r'^[A-Za-z0-9\\-/]{4,30}$');
+  final _credentialPattern = RegExp(r'^[A-Za-z0-9/-]{4,30}$');
 
   int currentStep = 0;
   String? selectedSpecialization;
