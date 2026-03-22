@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
 import '../auth/unified_login_screen.dart';
@@ -18,6 +19,8 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   int selectedIndex = 0;
   bool _isSyncing = false;
+  bool _isSavingDoctorReview = false;
+  bool _isDeletingRecord = false;
 
   @override
   void initState() {
@@ -40,6 +43,133 @@ class _AdminDashboardState extends State<AdminDashboard> {
     setState(() {
       _isSyncing = false;
     });
+  }
+
+  Future<void> _updateDoctorStatus(
+    DoctorModel doctor, {
+    required bool verified,
+    required bool rejected,
+  }) async {
+    setState(() {
+      _isSavingDoctorReview = true;
+    });
+
+    try {
+      await FirestoreDataService.instance.updateDoctorReviewStatus(
+        username: doctor.username,
+        verified: verified,
+        rejected: rejected,
+      );
+      await FirestoreDataService.instance.syncAllToAppState();
+    } catch (_) {
+      doctor.verified = verified;
+      doctor.rejected = rejected;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _isSavingDoctorReview = false;
+    });
+  }
+
+  Future<bool> _confirmDelete({
+    required String title,
+    required String message,
+  }) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text("Cancel"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text("Delete"),
+            ),
+          ],
+        );
+      },
+    );
+
+    return confirmed == true;
+  }
+
+  Future<void> _deleteDoctor(DoctorModel doctor) async {
+    final confirmed = await _confirmDelete(
+      title: "Delete doctor?",
+      message:
+          "This will permanently delete ${doctor.name} and all of that doctor's appointments.",
+    );
+    if (!confirmed) return;
+
+    setState(() {
+      _isDeletingRecord = true;
+    });
+
+    try {
+      await FirestoreDataService.instance.deleteDoctor(doctor.username);
+      await FirestoreDataService.instance.syncAllToAppState();
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isDeletingRecord = false;
+      });
+    }
+  }
+
+  Future<void> _deletePatient(PatientModel patient) async {
+    final confirmed = await _confirmDelete(
+      title: "Delete patient?",
+      message:
+          "This will permanently delete ${patient.name} and all of that patient's appointments.",
+    );
+    if (!confirmed) return;
+
+    setState(() {
+      _isDeletingRecord = true;
+    });
+
+    try {
+      await FirestoreDataService.instance.deletePatient(patient.username);
+      await FirestoreDataService.instance.syncAllToAppState();
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isDeletingRecord = false;
+      });
+    }
+  }
+
+  Future<void> _deleteAppointment(AppointmentModel appointment) async {
+    final confirmed = await _confirmDelete(
+      title: "Delete appointment?",
+      message:
+          "This will permanently remove the appointment for ${appointment.patientUsername} with ${appointment.doctorUsername}.",
+    );
+    if (!confirmed) return;
+
+    setState(() {
+      _isDeletingRecord = true;
+    });
+
+    try {
+      await FirestoreDataService.instance.deleteAppointment(appointment.id);
+      await FirestoreDataService.instance.syncAllToAppState();
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _isDeletingRecord = false;
+      });
+    }
   }
 
   @override
@@ -82,7 +212,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   )
                 : const Icon(Icons.refresh_rounded),
             tooltip: "Refresh",
-            onPressed: _isSyncing ? null : _syncAdminData,
+            onPressed: _isSyncing || _isSavingDoctorReview || _isDeletingRecord
+                ? null
+                : _syncAdminData,
           ),
           IconButton(
             icon: const Icon(Icons.logout_rounded),
@@ -287,18 +419,18 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   padding: const EdgeInsets.only(bottom: 16),
                   child: _DoctorReviewCard(
                     doctor: doctor,
-                    onVerify: () {
-                      setState(() {
-                        doctor.verified = true;
-                        doctor.rejected = false;
-                      });
-                    },
-                    onReject: () {
-                      setState(() {
-                        doctor.rejected = true;
-                        doctor.verified = false;
-                      });
-                    },
+                    reviewLocked: _isSavingDoctorReview || _isDeletingRecord,
+                    onVerify: () => _updateDoctorStatus(
+                      doctor,
+                      verified: true,
+                      rejected: false,
+                    ),
+                    onReject: () => _updateDoctorStatus(
+                      doctor,
+                      verified: false,
+                      rejected: true,
+                    ),
+                    onDelete: () => _deleteDoctor(doctor),
                   ),
                 ),
               )
@@ -316,13 +448,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   padding: const EdgeInsets.only(bottom: 16),
                   child: _DoctorReviewCard(
                     doctor: doctor,
-                    onVerify: () {},
-                    onReject: () {
-                      setState(() {
-                        doctor.rejected = true;
-                        doctor.verified = false;
-                      });
-                    },
+                    reviewLocked: _isSavingDoctorReview || _isDeletingRecord,
+                    onVerify: () async {},
+                    onReject: () => _updateDoctorStatus(
+                      doctor,
+                      verified: false,
+                      rejected: true,
+                    ),
+                    onDelete: () => _deleteDoctor(doctor),
                   ),
                 ),
               )
@@ -340,13 +473,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   padding: const EdgeInsets.only(bottom: 16),
                   child: _DoctorReviewCard(
                     doctor: doctor,
-                    onVerify: () {
-                      setState(() {
-                        doctor.verified = true;
-                        doctor.rejected = false;
-                      });
-                    },
-                    onReject: () {},
+                    reviewLocked: _isSavingDoctorReview || _isDeletingRecord,
+                    onVerify: () => _updateDoctorStatus(
+                      doctor,
+                      verified: true,
+                      rejected: false,
+                    ),
+                    onReject: () async {},
+                    onDelete: () => _deleteDoctor(doctor),
                   ),
                 ),
               )
@@ -371,7 +505,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
         return Padding(
           padding: const EdgeInsets.only(bottom: 16),
-          child: _PatientDirectoryCard(patient: patient),
+          child: _PatientDirectoryCard(
+            patient: patient,
+            deleteLocked: _isDeletingRecord,
+            onDelete: () => _deletePatient(patient),
+          ),
         );
       },
     );
@@ -408,7 +546,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
               .map(
                 (appt) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: _AppointmentLogCard(appointment: appt),
+                  child: _AppointmentLogCard(
+                    appointment: appt,
+                    deleteLocked: _isDeletingRecord,
+                    onDelete: () => _deleteAppointment(appt),
+                  ),
                 ),
               )
               .toList(),
@@ -423,7 +565,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
               .map(
                 (appt) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: _AppointmentLogCard(appointment: appt),
+                  child: _AppointmentLogCard(
+                    appointment: appt,
+                    deleteLocked: _isDeletingRecord,
+                    onDelete: () => _deleteAppointment(appt),
+                  ),
                 ),
               )
               .toList(),
@@ -438,7 +584,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
               .map(
                 (appt) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: _AppointmentLogCard(appointment: appt),
+                  child: _AppointmentLogCard(
+                    appointment: appt,
+                    deleteLocked: _isDeletingRecord,
+                    onDelete: () => _deleteAppointment(appt),
+                  ),
                 ),
               )
               .toList(),
@@ -453,7 +603,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
               .map(
                 (appt) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
-                  child: _AppointmentLogCard(appointment: appt),
+                  child: _AppointmentLogCard(
+                    appointment: appt,
+                    deleteLocked: _isDeletingRecord,
+                    onDelete: () => _deleteAppointment(appt),
+                  ),
                 ),
               )
               .toList(),
@@ -731,13 +885,17 @@ class _PriorityCard extends StatelessWidget {
 
 class _DoctorReviewCard extends StatelessWidget {
   final DoctorModel doctor;
-  final VoidCallback onVerify;
-  final VoidCallback onReject;
+  final bool reviewLocked;
+  final Future<void> Function() onVerify;
+  final Future<void> Function() onReject;
+  final Future<void> Function() onDelete;
 
   const _DoctorReviewCard({
     required this.doctor,
+    required this.reviewLocked,
     required this.onVerify,
     required this.onReject,
+    required this.onDelete,
   });
 
   @override
@@ -851,12 +1009,12 @@ class _DoctorReviewCard extends StatelessWidget {
                   return Column(
                     children: [
                       ElevatedButton(
-                        onPressed: onVerify,
+                        onPressed: reviewLocked ? null : () async => onVerify(),
                         child: const Text("Verify"),
                       ),
                       const SizedBox(height: 12),
                       OutlinedButton(
-                        onPressed: onReject,
+                        onPressed: reviewLocked ? null : () async => onReject(),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.danger,
                         ),
@@ -870,14 +1028,14 @@ class _DoctorReviewCard extends StatelessWidget {
                   children: [
                     Expanded(
                       child: ElevatedButton(
-                        onPressed: onVerify,
+                        onPressed: reviewLocked ? null : () async => onVerify(),
                         child: const Text("Verify"),
                       ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: OutlinedButton(
-                        onPressed: onReject,
+                        onPressed: reviewLocked ? null : () async => onReject(),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.danger,
                         ),
@@ -891,7 +1049,7 @@ class _DoctorReviewCard extends StatelessWidget {
           ] else if (doctor.verified) ...[
             const SizedBox(height: 18),
             OutlinedButton(
-              onPressed: onReject,
+              onPressed: reviewLocked ? null : () async => onReject(),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.danger,
               ),
@@ -900,10 +1058,19 @@ class _DoctorReviewCard extends StatelessWidget {
           ] else if (doctor.rejected) ...[
             const SizedBox(height: 18),
             ElevatedButton(
-              onPressed: onVerify,
+              onPressed: reviewLocked ? null : () async => onVerify(),
               child: const Text("Approve now"),
             ),
           ],
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: reviewLocked ? null : () async => onDelete(),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.danger,
+            ),
+            icon: const Icon(Icons.delete_outline_rounded),
+            label: const Text("Delete doctor"),
+          ),
         ],
       ),
     );
@@ -995,8 +1162,14 @@ class _DoctorSection extends StatelessWidget {
 
 class _PatientDirectoryCard extends StatelessWidget {
   final PatientModel patient;
+  final bool deleteLocked;
+  final Future<void> Function() onDelete;
 
-  const _PatientDirectoryCard({required this.patient});
+  const _PatientDirectoryCard({
+    required this.patient,
+    required this.deleteLocked,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1018,67 +1191,85 @@ class _PatientDirectoryCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              color: AppColors.accent,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: imageBytes == null
-                ? Center(
-                    child: Text(
-                      patient.name.isNotEmpty ? patient.name[0].toUpperCase() : "P",
+          Row(
+            children: [
+              Container(
+                width: 58,
+                height: 58,
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: imageBytes == null
+                    ? Center(
+                        child: Text(
+                          patient.name.isNotEmpty
+                              ? patient.name[0].toUpperCase()
+                              : "P",
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 22,
+                          ),
+                        ),
+                      )
+                    : Image.memory(imageBytes, fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      patient.name,
                       style: const TextStyle(
-                        color: AppColors.primary,
+                        color: AppColors.darkText,
                         fontWeight: FontWeight.w800,
-                        fontSize: 22,
+                        fontSize: 16,
                       ),
                     ),
-                  )
-                : Image.memory(imageBytes, fit: BoxFit.cover),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  patient.name,
+                    const SizedBox(height: 6),
+                    Text(
+                      patient.email,
+                      style: const TextStyle(color: AppColors.mutedText),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      patient.phone,
+                      style: const TextStyle(color: AppColors.mutedText),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Text(
+                  "${patient.medicalReports.length} reports",
                   style: const TextStyle(
-                    color: AppColors.darkText,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 16,
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  patient.email,
-                  style: const TextStyle(color: AppColors.mutedText),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  patient.phone,
-                  style: const TextStyle(color: AppColors.mutedText),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            decoration: BoxDecoration(
-              color: AppColors.accent,
-              borderRadius: BorderRadius.circular(18),
-            ),
-            child: Text(
-              "${patient.medicalReports.length} reports",
-              style: const TextStyle(
-                color: AppColors.primary,
-                fontWeight: FontWeight.w700,
               ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: deleteLocked ? null : () async => onDelete(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.danger,
+              ),
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text("Delete patient"),
             ),
           ),
         ],
@@ -1088,9 +1279,15 @@ class _PatientDirectoryCard extends StatelessWidget {
 }
 
 class _AppointmentLogCard extends StatelessWidget {
-  final dynamic appointment;
+  final AppointmentModel appointment;
+  final bool deleteLocked;
+  final Future<void> Function() onDelete;
 
-  const _AppointmentLogCard({required this.appointment});
+  const _AppointmentLogCard({
+    required this.appointment,
+    required this.deleteLocked,
+    required this.onDelete,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1157,6 +1354,18 @@ class _AppointmentLogCard extends StatelessWidget {
               label: "Rescheduled to",
               value: "${appointment.rescheduledDate} at ${appointment.rescheduledTime}",
             ),
+          const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerRight,
+            child: OutlinedButton.icon(
+              onPressed: deleteLocked ? null : () async => onDelete(),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.danger,
+              ),
+              icon: const Icon(Icons.delete_outline_rounded),
+              label: const Text("Delete appointment"),
+            ),
+          ),
         ],
       ),
     );

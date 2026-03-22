@@ -1,13 +1,13 @@
 {
   "project_info": {
-    "project_number": "462494703240",
-    "project_id": "godoc-4cfc9",
-    "storage_bucket": "godoc-4cfc9.firebasestorage.app"
+    "project_number": "206537940834",
+    "project_id": "project-c19ca",
+    "storage_bucket": "project-c19ca.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:462494703240:android:ef9088e754f6087a68493d",
+        "mobilesdk_app_id": "1:206537940834:android:97a66bc52f88dc11d5d63b",
         "android_client_info": {
           "package_name": "com.example.godoc"
         }
@@ -15,7 +15,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyCJMiOlrBnU4xJ7pGA0WQyEwtza9TfnTaI"
+          "current_key": "AIzaSyDFfnc5VXosHvY3tp3pBgXxdndP9s6hGak"
         }
       ],
       "services": {

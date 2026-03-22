@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
 import 'booking_screen.dart';
+import 'clinic_route_screen.dart';
 
 class DoctorDetailScreen extends StatelessWidget {
   final DoctorModel doctor;
@@ -61,7 +64,10 @@ class DoctorDetailScreen extends StatelessWidget {
                 children: [
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                    icon: const Icon(
+                      Icons.arrow_back_rounded,
+                      color: Colors.white,
+                    ),
                     style: IconButton.styleFrom(
                       backgroundColor: Colors.white.withOpacity(0.16),
                     ),
@@ -126,7 +132,8 @@ class DoctorDetailScreen extends StatelessWidget {
                       ),
                       _InfoPill(
                         icon: Icons.currency_rupee_rounded,
-                        label: "${doctor.consultationFee.toStringAsFixed(0)} fee",
+                        label:
+                            "${doctor.consultationFee.toStringAsFixed(0)} fee",
                       ),
                     ],
                   ),
@@ -193,9 +200,11 @@ class DoctorDetailScreen extends StatelessWidget {
                         if (doctor.clinicLatitude != null &&
                             doctor.clinicLongitude != null) ...[
                           const SizedBox(height: 16),
-                          _PatientMapPreview(
+                          _ClinicMapPreview(
                             latitude: doctor.clinicLatitude!,
                             longitude: doctor.clinicLongitude!,
+                            clinicName: doctor.clinicName,
+                            clinicAddress: doctor.clinicAddress,
                           ),
                         ],
                       ],
@@ -247,7 +256,8 @@ class DoctorDetailScreen extends StatelessWidget {
                                   const SizedBox(width: 14),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           DateFormat('EEEE').format(slot.date),
@@ -397,72 +407,116 @@ class _InfoPill extends StatelessWidget {
   }
 }
 
-class _PatientMapPreview extends StatelessWidget {
+class _ClinicMapPreview extends StatefulWidget {
   final double latitude;
   final double longitude;
+  final String clinicName;
+  final String clinicAddress;
 
-  const _PatientMapPreview({
+  const _ClinicMapPreview({
     required this.latitude,
     required this.longitude,
+    required this.clinicName,
+    required this.clinicAddress,
   });
 
   @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      height: 150,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFE7F3FF), Color(0xFFE8F8F2)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+  State<_ClinicMapPreview> createState() => _ClinicMapPreviewState();
+}
+
+class _ClinicMapPreviewState extends State<_ClinicMapPreview> {
+  final Completer<GoogleMapController> _controller = Completer();
+
+  void _openRouteScreen() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClinicRouteScreen(
+          clinicLatitude: widget.latitude,
+          clinicLongitude: widget.longitude,
+          clinicName: widget.clinicName,
+          clinicAddress: widget.clinicAddress,
         ),
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: CustomPaint(painter: _PatientMapPainter()),
-          ),
-          const Center(
-            child: Icon(
-              Icons.location_on_rounded,
-              color: AppColors.danger,
-              size: 30,
-            ),
-          ),
-          Positioned(
-            left: 14,
-            bottom: 14,
-            child: Text(
-              "${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}",
-              style: const TextStyle(
-                color: AppColors.darkText,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
       ),
     );
   }
-}
 
-class _PatientMapPainter extends CustomPainter {
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0x332F6E6E)
-      ..strokeWidth = 1;
-
-    for (double x = 20; x < size.width; x += 38) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (double y = 20; y < size.height; y += 28) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: _openRouteScreen,
+      child: Container(
+        width: double.infinity,
+        height: 180,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.border),
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Stack(
+          children: [
+            GoogleMap(
+              initialCameraPosition: CameraPosition(
+                target: LatLng(widget.latitude, widget.longitude),
+                zoom: 14,
+              ),
+              markers: {
+                Marker(
+                  markerId: const MarkerId('clinic_marker'),
+                  position: LatLng(widget.latitude, widget.longitude),
+                  infoWindow: InfoWindow(
+                    title: widget.clinicName,
+                    snippet: widget.clinicAddress,
+                  ),
+                ),
+              },
+              zoomControlsEnabled: false,
+              zoomGesturesEnabled: false,
+              scrollGesturesEnabled: false,
+              rotateGesturesEnabled: false,
+              tiltGesturesEnabled: false,
+              myLocationEnabled: false,
+              myLocationButtonEnabled: false,
+              onMapCreated: (controller) {
+                if (!_controller.isCompleted) {
+                  _controller.complete(controller);
+                }
+              },
+            ),
+            Container(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.0),
+                    Colors.black.withOpacity(0.35),
+                  ],
+                ),
+              ),
+            ),
+            const Center(
+              child: Icon(
+                Icons.location_on_rounded,
+                color: AppColors.danger,
+                size: 40,
+              ),
+            ),
+            Positioned(
+              left: 14,
+              bottom: 10,
+              right: 14,
+              child: Text(
+                "Tap to view route",
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

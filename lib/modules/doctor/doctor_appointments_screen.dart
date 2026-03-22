@@ -23,23 +23,55 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
       .where((a) => a.doctorUsername == widget.doctor.username)
       .toList();
 
-  void confirmAppointment(AppointmentModel appt) {
+  Future<void> confirmAppointment(AppointmentModel appt) async {
     setState(() {
       appt.status = "confirmed";
     });
 
-    AppState.notifications.add("Your appointment has been confirmed");
+    await FirestoreDataService.instance.saveAppointment(appt);
+    await FirestoreDataService.instance.syncAllToAppState();
+    AppState.notifications.add(
+      "Your appointment has been confirmed by Dr. ${widget.doctor.name}.",
+    );
   }
 
-  void rejectAppointment(AppointmentModel appt) {
+  Future<void> rejectAppointment(AppointmentModel appt) async {
     setState(() {
       appt.status = "rejected";
+      _applyFullRefundIfOnline(
+        appt,
+        reason: "Doctor rejected the online consultation.",
+      );
     });
 
-    AppState.notifications.add("Your appointment has been rejected");
+    await FirestoreDataService.instance.saveAppointment(appt);
+    await FirestoreDataService.instance.syncAllToAppState();
+    AppState.notifications.add(
+      appt.type.toLowerCase() == "online"
+          ? "Your online consultation was rejected. A 100% fee refund has been issued."
+          : "Your appointment has been rejected.",
+    );
   }
 
-  void rescheduleAppointment(AppointmentModel appt) async {
+  Future<void> cancelAppointment(AppointmentModel appt) async {
+    setState(() {
+      appt.status = "cancelled";
+      _applyFullRefundIfOnline(
+        appt,
+        reason: "Doctor cancelled the online consultation.",
+      );
+    });
+
+    await FirestoreDataService.instance.saveAppointment(appt);
+    await FirestoreDataService.instance.syncAllToAppState();
+    AppState.notifications.add(
+      appt.type.toLowerCase() == "online"
+          ? "Your online consultation was cancelled. A 100% fee refund has been issued."
+          : "Your appointment has been cancelled by the doctor.",
+    );
+  }
+
+  Future<void> rescheduleAppointment(AppointmentModel appt) async {
     String? newDate = await showDatePickerDialog();
     if (newDate == null) return;
 
@@ -52,7 +84,27 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
       appt.rescheduledTime = newTime;
     });
 
+    await FirestoreDataService.instance.saveAppointment(appt);
+    await FirestoreDataService.instance.syncAllToAppState();
     AppState.notifications.add("Your appointment has been rescheduled");
+  }
+
+  void _applyFullRefundIfOnline(
+    AppointmentModel appt, {
+    required String reason,
+  }) {
+    if (appt.type.toLowerCase() != "online") {
+      appt.refundIssued = false;
+      appt.refundPercentage = 0;
+      appt.refundReason = null;
+      appt.refundedAt = null;
+      return;
+    }
+
+    appt.refundIssued = true;
+    appt.refundPercentage = 100;
+    appt.refundReason = reason;
+    appt.refundedAt = DateTime.now();
   }
 
   Future<void> _startVideoCall(AppointmentModel appt) async {
@@ -171,6 +223,15 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                   Text("New Time: ${appt.rescheduledTime}"),
                 ],
 
+                if (appt.refundIssued) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    "Refund: ${appt.refundPercentage.toStringAsFixed(0)}% issued",
+                  ),
+                  if (appt.refundReason?.isNotEmpty == true)
+                    Text("Reason: ${appt.refundReason}"),
+                ],
+
                 const SizedBox(height: 15),
 
                 if (appt.status == "pending")
@@ -242,6 +303,14 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                           style: const TextStyle(fontSize: 12),
                         ),
                       ],
+                      const SizedBox(height: 10),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                        ),
+                        onPressed: () => cancelAppointment(appt),
+                        child: const Text("Cancel Online Consultation"),
+                      ),
                     ],
                   ),
               ],
@@ -260,6 +329,8 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
         return Colors.red.shade200;
       case "rescheduled":
         return Colors.orange.shade200;
+      case "cancelled":
+        return Colors.red.shade100;
       default:
         return Colors.grey.shade300;
     }

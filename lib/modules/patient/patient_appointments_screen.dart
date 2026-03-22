@@ -105,7 +105,12 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
       appt.feedbackRating = rating;
     });
 
-    await FirestoreDataService.instance.saveAppointment(appt);
+    await FirestoreDataService.instance.saveAppointmentFeedback(
+      appointmentId: appt.id,
+      rating: rating,
+      comments: commentController.text.trim(),
+    );
+    await FirestoreDataService.instance.syncAllToAppState();
 
     if (!mounted) return;
     ScaffoldMessenger.of(
@@ -159,6 +164,8 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
         return Colors.red.shade200;
       case "rescheduled":
         return Colors.orange.shade200;
+      case "cancelled":
+        return Colors.red.shade100;
       default:
         return Colors.grey.shade300;
     }
@@ -290,6 +297,36 @@ class _AppointmentCard extends StatelessWidget {
                 ),
               ],
             ),
+          ],
+
+          if (appointment.refundIssued) ...[
+            const SizedBox(height: 16),
+            const Divider(height: 1),
+            const SizedBox(height: 14),
+            Text(
+              "Refund issued: ${appointment.refundPercentage.toStringAsFixed(0)}%",
+              style: const TextStyle(
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              appointment.refundReason?.isNotEmpty == true
+                  ? appointment.refundReason!
+                  : "The doctor processed a full refund for this online consultation.",
+              style: const TextStyle(
+                color: AppColors.mutedText,
+                height: 1.4,
+              ),
+            ),
+            if (appointment.refundedAt != null) ...[
+              const SizedBox(height: 8),
+              Text(
+                "Refund time: ${appointment.refundedAt!.toLocal()}".split('.').first,
+                style: const TextStyle(fontSize: 12),
+              ),
+            ],
           ],
 
           const SizedBox(height: 16),

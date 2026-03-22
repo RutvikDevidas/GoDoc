@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/firebase/firestore_data_service.dart';
 import '../../models/doctor_model.dart';
+import '../shared/clinic_location_picker_screen.dart';
 
 class DoctorEditProfileScreen extends StatefulWidget {
   final DoctorModel doctor;
@@ -20,6 +21,9 @@ class DoctorEditProfileScreen extends StatefulWidget {
 class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final ImagePicker _imagePicker = ImagePicker();
+  final _phonePattern = RegExp(r'^[0-9]{7,15}$');
+  final _upiPattern = RegExp(r'^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$');
+  final _ifscPattern = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
 
   late final TextEditingController name;
   late final TextEditingController username;
@@ -31,6 +35,14 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
   late final TextEditingController bio;
   late final TextEditingController upiId;
   late final TextEditingController consultationFee;
+  late final TextEditingController bankAccountHolder;
+  late final TextEditingController bankName;
+  late final TextEditingController bankAccountNumber;
+  late final TextEditingController bankIfscCode;
+
+  double? _selectedLatitude;
+  double? _selectedLongitude;
+
   late List<DoctorAvailability> availability;
 
   @override
@@ -48,6 +60,18 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     consultationFee = TextEditingController(
       text: widget.doctor.consultationFee.toStringAsFixed(0),
     );
+    bankAccountHolder = TextEditingController(
+      text: widget.doctor.bankAccountHolder,
+    );
+    bankName = TextEditingController(text: widget.doctor.bankName);
+    bankAccountNumber = TextEditingController(
+      text: widget.doctor.bankAccountNumber,
+    );
+    bankIfscCode = TextEditingController(text: widget.doctor.bankIfscCode);
+
+    _selectedLatitude = widget.doctor.clinicLatitude;
+    _selectedLongitude = widget.doctor.clinicLongitude;
+
     availability = widget.doctor.availability
         .map(
           (slot) => DoctorAvailability(
@@ -70,6 +94,10 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     bio.dispose();
     upiId.dispose();
     consultationFee.dispose();
+    bankAccountHolder.dispose();
+    bankName.dispose();
+    bankAccountNumber.dispose();
+    bankIfscCode.dispose();
     super.dispose();
   }
 
@@ -77,16 +105,22 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     widget.doctor.name = name.text.trim();
-    widget.doctor.username = username.text.trim();
     widget.doctor.specialization = specialization.text.trim();
     widget.doctor.phone = phone.text.trim();
     widget.doctor.clinicName = clinicName.text.trim();
     widget.doctor.clinicAddress = clinicAddress.text.trim();
     widget.doctor.clinicLocation = clinicLocation.text.trim();
+    widget.doctor.clinicLatitude = _selectedLatitude;
+    widget.doctor.clinicLongitude = _selectedLongitude;
     widget.doctor.bio = bio.text.trim();
     widget.doctor.upiId = upiId.text.trim();
+    widget.doctor.bankAccountHolder = bankAccountHolder.text.trim();
+    widget.doctor.bankName = bankName.text.trim();
+    widget.doctor.bankAccountNumber = bankAccountNumber.text.trim();
+    widget.doctor.bankIfscCode = bankIfscCode.text.trim().toUpperCase();
     widget.doctor.consultationFee =
-        double.tryParse(consultationFee.text.trim()) ?? widget.doctor.consultationFee;
+        double.tryParse(consultationFee.text.trim()) ??
+        widget.doctor.consultationFee;
     widget.doctor.availability = availability
         .map(
           (slot) => DoctorAvailability(
@@ -110,6 +144,30 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     final bytes = await file.readAsBytes();
     setState(() {
       widget.doctor.profileImageData = base64Encode(bytes);
+    });
+  }
+
+  Future<void> _pickClinicLocation() async {
+    final result = await Navigator.push<ClinicLocationResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClinicLocationPickerScreen(
+          initialLatitude: _selectedLatitude,
+          initialLongitude: _selectedLongitude,
+          initialAddress: clinicAddress.text.trim().isEmpty
+              ? null
+              : clinicAddress.text.trim(),
+        ),
+      ),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      _selectedLatitude = result.latitude;
+      _selectedLongitude = result.longitude;
+      clinicAddress.text = result.address;
+      clinicLocation.text = result.address;
     });
   }
 
@@ -164,10 +222,7 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
       appBar: AppBar(
         title: const Text("Edit Profile"),
         actions: [
-          TextButton(
-            onPressed: _saveProfile,
-            child: const Text("Save"),
-          ),
+          TextButton(onPressed: _saveProfile, child: const Text("Save")),
         ],
       ),
       body: SingleChildScrollView(
@@ -198,9 +253,21 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                 child: Column(
                   children: [
                     _buildField(name, "Full name"),
-                    _buildField(username, "Username"),
+                    _buildField(
+                      username,
+                      "Username",
+                      readOnly: true,
+                      helperText: "Username cannot be changed after registration.",
+                    ),
                     _buildField(specialization, "Specialization"),
-                    _buildField(phone, "Phone number", keyboardType: TextInputType.phone),
+                    _buildField(
+                      phone,
+                      "Phone number",
+                      keyboardType: TextInputType.phone,
+                      extraValidator: (value) => _phonePattern.hasMatch(value)
+                          ? null
+                          : "Enter a valid phone number",
+                    ),
                   ],
                 ),
               ),
@@ -212,12 +279,36 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                     _buildField(clinicName, "Clinic name"),
                     _buildField(clinicAddress, "Clinic address", maxLines: 2),
                     _buildField(clinicLocation, "Clinic location"),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _pickClinicLocation,
+                        icon: const Icon(Icons.map_outlined),
+                        label: const Text("Pick location on map"),
+                      ),
+                    ),
+                    if (_selectedLatitude != null &&
+                        _selectedLongitude != null) ...[
+                      const SizedBox(height: 6),
+                      Text(
+                        "Selected: ${_selectedLatitude!.toStringAsFixed(5)}, ${_selectedLongitude!.toStringAsFixed(5)}",
+                        style: const TextStyle(color: AppColors.mutedText),
+                      ),
+                    ],
                     _buildField(
                       consultationFee,
                       "Consultation fee",
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                     ),
-                    _buildField(upiId, "UPI ID"),
+                    _buildField(
+                      upiId,
+                      "UPI ID",
+                      extraValidator: (value) => _upiPattern.hasMatch(value)
+                          ? null
+                          : "Enter a valid UPI ID",
+                    ),
                   ],
                 ),
               ),
@@ -250,7 +341,8 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                           child: _AvailabilityEditorCard(
                             availability: entry.value,
                             onAddSlot: () => _addTimeSlot(entry.key),
-                            onRemoveDay: () => _removeAvailabilityDay(entry.key),
+                            onRemoveDay: () =>
+                                _removeAvailabilityDay(entry.key),
                             onRemoveSlot: (slotIndex) =>
                                 _removeTimeSlot(entry.key, slotIndex),
                           ),
@@ -259,6 +351,38 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                     OutlinedButton(
                       onPressed: _addAvailabilityDay,
                       child: const Text("Add available day"),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              _FormSection(
+                title: "E-banking details",
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Add the payment details patients can use while booking an online consultation.",
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _buildField(bankAccountHolder, "Account holder name"),
+                    _buildField(bankName, "Bank name"),
+                    _buildField(
+                      bankAccountNumber,
+                      "Account number",
+                      keyboardType: TextInputType.number,
+                    ),
+                    _buildField(
+                      bankIfscCode,
+                      "IFSC code",
+                      extraValidator: (value) =>
+                          value.isEmpty || _ifscPattern.hasMatch(value.toUpperCase())
+                              ? null
+                              : "Enter a valid IFSC code",
                     ),
                   ],
                 ),
@@ -280,16 +404,23 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     String label, {
     int maxLines = 1,
     TextInputType? keyboardType,
+    bool readOnly = false,
+    String? helperText,
+    String? Function(String value)? extraValidator,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: TextFormField(
         controller: controller,
         maxLines: maxLines,
+        readOnly: readOnly,
         keyboardType: keyboardType,
-        validator: (value) =>
-            value == null || value.trim().isEmpty ? "Required" : null,
-        decoration: InputDecoration(labelText: label),
+        validator: (value) {
+          final trimmed = value?.trim() ?? '';
+          if (trimmed.isEmpty) return "Required";
+          return extraValidator?.call(trimmed);
+        },
+        decoration: InputDecoration(labelText: label, helperText: helperText),
       ),
     );
   }

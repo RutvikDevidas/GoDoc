@@ -31,6 +31,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
   final Set<String> _notifiedCallIds = {};
   StreamSubscription<List<AppointmentModel>>? _appointmentSubscription;
+  StreamSubscription<List<DoctorModel>>? _doctorSubscription;
 
   List<DoctorModel> get _verifiedDoctors =>
       AppState.doctors.where((doctor) => doctor.verified).toList();
@@ -104,14 +105,27 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   @override
   void initState() {
     super.initState();
+    _subscribeToDoctorUpdates();
     _subscribeToAppointmentUpdates();
   }
 
   @override
   void dispose() {
+    _doctorSubscription?.cancel();
     _appointmentSubscription?.cancel();
     searchController.dispose();
     super.dispose();
+  }
+
+  void _subscribeToDoctorUpdates() {
+    _doctorSubscription = FirestoreDataService.instance.watchDoctors().listen((
+      doctors,
+    ) {
+      AppState.doctors = doctors;
+      if (mounted) {
+        setState(() {});
+      }
+    });
   }
 
   void _subscribeToAppointmentUpdates() {

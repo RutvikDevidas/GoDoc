@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
-import 'doctor_login_screen.dart';
 
 class DoctorSuccessScreen extends StatefulWidget {
   const DoctorSuccessScreen({super.key});

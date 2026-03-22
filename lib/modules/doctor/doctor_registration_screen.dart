@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
-
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/firebase/firebase_state.dart';
 import '../../models/doctor_model.dart';
+import '../shared/clinic_location_picker_screen.dart';
 import 'doctor_success_screen.dart';
 
 class DoctorRegistrationScreen extends StatefulWidget {
@@ -41,6 +42,9 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   final phone = TextEditingController();
   final clinicName = TextEditingController();
   final clinicAddress = TextEditingController();
+  final _usernamePattern = RegExp(r'^[a-zA-Z0-9_]{4,20}$');
+  final _phonePattern = RegExp(r'^[0-9]{7,15}$');
+  final _credentialPattern = RegExp(r'^[A-Za-z0-9\\-/]{4,30}$');
 
   int currentStep = 0;
   String? selectedSpecialization;
@@ -76,15 +80,41 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     }
   }
 
+  Future<void> _pickClinicLocation() async {
+    final result = await Navigator.push<ClinicLocationResult>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ClinicLocationPickerScreen(
+          initialLatitude: selectedLatitude,
+          initialLongitude: selectedLongitude,
+          initialAddress: clinicAddress.text.trim().isEmpty
+              ? null
+              : clinicAddress.text.trim(),
+        ),
+      ),
+    );
+
+    if (result == null) return;
+
+    setState(() {
+      selectedLatitude = result.latitude;
+      selectedLongitude = result.longitude;
+      clinicAddress.text = result.address;
+    });
+  }
+
   bool _validateStep(int step) {
     switch (step) {
       case 0:
-        return _hasValues([username, password, name, dob]);
+        return _hasValues([username, password, name, dob]) &&
+            _validateAccountStep();
       case 1:
         return _hasValues([prNumber, nmcNumber, licenceNumber]) &&
+            _validateProfessionalStep() &&
             _validateSpecialization();
       case 2:
         return _hasValues([phone, clinicName, clinicAddress]) &&
+            _validateClinicStep() &&
             _validateClinicLocation();
       default:
         return false;
@@ -92,7 +122,9 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   }
 
   bool _hasValues(List<TextEditingController> controllers) {
-    final hasMissing = controllers.any((controller) => controller.text.trim().isEmpty);
+    final hasMissing = controllers.any(
+      (controller) => controller.text.trim().isEmpty,
+    );
     if (!hasMissing) return true;
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -112,13 +144,58 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     return false;
   }
 
+  bool _validateAccountStep() {
+    if (!_usernamePattern.hasMatch(username.text.trim())) {
+      _showMessage(
+        "Username must be 4-20 characters using letters, numbers, or _.",
+      );
+      return false;
+    }
+    if (password.text.trim().length < 6) {
+      _showMessage("Password must be at least 6 characters.");
+      return false;
+    }
+    return true;
+  }
+
+  bool _validateProfessionalStep() {
+    final values = [
+      prNumber.text.trim(),
+      nmcNumber.text.trim(),
+      licenceNumber.text.trim(),
+    ];
+    if (values.any((value) => !_credentialPattern.hasMatch(value))) {
+      _showMessage(
+        "Professional IDs should be 4-30 characters and only use letters, numbers, - or /.",
+      );
+      return false;
+    }
+    return true;
+  }
+
+  bool _validateClinicStep() {
+    if (!_phonePattern.hasMatch(phone.text.trim())) {
+      _showMessage("Enter a valid phone number.");
+      return false;
+    }
+    return true;
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
   bool _validateClinicLocation() {
     if (selectedLatitude != null && selectedLongitude != null) {
       return true;
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Please select the clinic location on the map.")),
+      const SnackBar(
+        content: Text("Please select the clinic location on the map."),
+      ),
     );
     return false;
   }
@@ -157,12 +234,14 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
       clinicLongitude: selectedLongitude,
     );
 
-    final usernameTaken = AppState.doctors.any(
-      (existing) => existing.username == doctor.username,
+    final usernameTaken = await FirestoreDataService.instance.usernameExists(
+      doctor.username,
     );
     if (usernameTaken) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Username already exists. Try another one.")),
+        const SnackBar(
+          content: Text("Username already exists. Try another one."),
+        ),
       );
       return;
     }
@@ -170,13 +249,13 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     try {
       await FirestoreDataService.instance.saveDoctor(doctor);
       await FirestoreDataService.instance.syncAllToAppState();
-    } catch (_) {
+    } catch (error) {
       AppState.doctors.add(doctor);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              "Saved locally. Firebase sync is not available right now.",
+              "Saved locally only. ${firebaseUnavailableReason ?? error.toString()}",
             ),
           ),
         );
@@ -324,21 +403,66 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
       case 2:
         return Column(
           children: [
-            _buildField(phone, "Phone number", keyboardType: TextInputType.phone),
+            _buildField(
+              phone,
+              "Phone number",
+              keyboardType: TextInputType.phone,
+            ),
             _buildField(clinicName, "Clinic name"),
             _buildField(clinicAddress, "Clinic address", maxLines: 3),
             const SizedBox(height: 4),
             _MapSelectionHint(label: _clinicLocationLabel),
             const SizedBox(height: 12),
-            _ClinicMapPicker(
-              latitude: selectedLatitude,
-              longitude: selectedLongitude,
-              onChanged: (latitude, longitude) {
-                setState(() {
-                  selectedLatitude = latitude;
-                  selectedLongitude = longitude;
-                });
-              },
+            GestureDetector(
+              onTap: _pickClinicLocation,
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FBFD),
+                  borderRadius: BorderRadius.circular(24),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: const [
+                        Icon(Icons.map_outlined, color: AppColors.primary),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            "Choose clinic location",
+                            style: TextStyle(
+                              color: AppColors.darkText,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      selectedLatitude == null || selectedLongitude == null
+                          ? "Open the map picker to pin your clinic for patients."
+                          : "Pinned at ${selectedLatitude!.toStringAsFixed(4)}, ${selectedLongitude!.toStringAsFixed(4)}",
+                      style: const TextStyle(
+                        color: AppColors.mutedText,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: OutlinedButton.icon(
+                        onPressed: _pickClinicLocation,
+                        icon: const Icon(Icons.place_outlined),
+                        label: const Text("Open map picker"),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
           ],
         );
@@ -379,10 +503,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         onTap: onTap,
         maxLines: maxLines,
         keyboardType: keyboardType,
-        decoration: InputDecoration(
-          labelText: label,
-          suffixIcon: suffixIcon,
-        ),
+        decoration: InputDecoration(labelText: label, suffixIcon: suffixIcon),
       ),
     );
   }
@@ -391,13 +512,11 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
       child: DropdownButtonFormField<String>(
-        value: selectedSpecialization,
+        initialValue: selectedSpecialization,
         items: _specializations
             .map(
-              (item) => DropdownMenuItem<String>(
-                value: item,
-                child: Text(item),
-              ),
+              (item) =>
+                  DropdownMenuItem<String>(value: item, child: Text(item)),
             )
             .toList(),
         onChanged: (value) {
@@ -406,9 +525,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
             specialization.text = value ?? "";
           });
         },
-        decoration: const InputDecoration(
-          labelText: "Specialization",
-        ),
+        decoration: const InputDecoration(labelText: "Specialization"),
       ),
     );
   }
@@ -517,10 +634,7 @@ class _StepPage extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             subtitle,
-            style: const TextStyle(
-              color: AppColors.mutedText,
-              height: 1.5,
-            ),
+            style: const TextStyle(color: AppColors.mutedText, height: 1.5),
           ),
           const SizedBox(height: 20),
           child,
@@ -548,136 +662,4 @@ class _MapSelectionHint extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ClinicMapPicker extends StatelessWidget {
-  final double? latitude;
-  final double? longitude;
-  final void Function(double latitude, double longitude) onChanged;
-
-  const _ClinicMapPicker({
-    required this.latitude,
-    required this.longitude,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        const height = 220.0;
-
-        Offset? markerOffset;
-        if (latitude != null && longitude != null) {
-          final dx = ((longitude! - 68) / 29).clamp(0.0, 1.0) * width;
-          final dy = ((37 - latitude!) / 29).clamp(0.0, 1.0) * height;
-          markerOffset = Offset(dx, dy);
-        }
-
-        return GestureDetector(
-          onTapDown: (details) {
-            final dx = details.localPosition.dx.clamp(0.0, width);
-            final dy = details.localPosition.dy.clamp(0.0, height);
-            final longitude = 68 + (dx / width) * 29;
-            final latitude = 37 - (dy / height) * 29;
-            onChanged(latitude, longitude);
-          },
-          child: Container(
-            width: double.infinity,
-            height: height,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFFE7F3FF), Color(0xFFE8F8F2)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: _MapGridPainter(),
-                  ),
-                ),
-                const Positioned(
-                  left: 16,
-                  top: 14,
-                  child: Text(
-                    "Clinic map",
-                    style: TextStyle(
-                      color: AppColors.darkText,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                const Positioned(
-                  left: 16,
-                  top: 36,
-                  child: Text(
-                    "Tap to drop a location pin",
-                    style: TextStyle(
-                      color: AppColors.mutedText,
-                      fontSize: 12,
-                    ),
-                  ),
-                ),
-                if (markerOffset != null)
-                  Positioned(
-                    left: markerOffset.dx - 14,
-                    top: markerOffset.dy - 28,
-                    child: const Icon(
-                      Icons.location_on_rounded,
-                      color: AppColors.danger,
-                      size: 28,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _MapGridPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final gridPaint = Paint()
-      ..color = const Color(0x332F6E6E)
-      ..strokeWidth = 1;
-    final accentPaint = Paint()
-      ..color = const Color(0x220B6E6E)
-      ..strokeWidth = 3;
-
-    for (double x = 24; x < size.width; x += 42) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-    for (double y = 24; y < size.height; y += 36) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
-    }
-
-    final path = Path()
-      ..moveTo(22, size.height * 0.72)
-      ..quadraticBezierTo(
-        size.width * 0.25,
-        size.height * 0.38,
-        size.width * 0.48,
-        size.height * 0.56,
-      )
-      ..quadraticBezierTo(
-        size.width * 0.72,
-        size.height * 0.78,
-        size.width - 18,
-        size.height * 0.34,
-      );
-
-    canvas.drawPath(path, accentPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

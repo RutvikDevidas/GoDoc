@@ -2,16 +2,10 @@ class DoctorAvailability {
   final DateTime date;
   final List<String> timeSlots;
 
-  DoctorAvailability({
-    required this.date,
-    required this.timeSlots,
-  });
+  DoctorAvailability({required this.date, required this.timeSlots});
 
   Map<String, dynamic> toMap() {
-    return {
-      'date': date.toIso8601String(),
-      'timeSlots': timeSlots,
-    };
+    return {'date': date.toIso8601String(), 'timeSlots': timeSlots};
   }
 
   factory DoctorAvailability.fromMap(Map<String, dynamic> map) {
@@ -42,6 +36,10 @@ class DoctorModel {
   double? clinicLongitude;
   String bio;
   String upiId;
+  String bankAccountHolder;
+  String bankName;
+  String bankAccountNumber;
+  String bankIfscCode;
   String? profileImageData;
   double consultationFee;
   List<DoctorAvailability> availability;
@@ -66,6 +64,10 @@ class DoctorModel {
     this.clinicLongitude,
     String? bio,
     String? upiId,
+    String? bankAccountHolder,
+    String? bankName,
+    String? bankAccountNumber,
+    String? bankIfscCode,
     this.profileImageData,
     this.consultationFee = 500,
     List<DoctorAvailability>? availability,
@@ -73,7 +75,11 @@ class DoctorModel {
     this.rejected = false,
   }) : clinicLocation = clinicLocation ?? clinicAddress,
        bio = bio ?? _defaultBio(name, specialization, clinicName),
-       upiId = upiId ?? "${username}@upi",
+       upiId = upiId ?? "$username@upi",
+       bankAccountHolder = bankAccountHolder ?? '',
+       bankName = bankName ?? '',
+       bankAccountNumber = bankAccountNumber ?? '',
+       bankIfscCode = bankIfscCode ?? '',
        availability = availability ?? _defaultAvailability();
 
   static String _defaultBio(
@@ -87,9 +93,11 @@ class DoctorModel {
 
   static List<DoctorAvailability> _defaultAvailability() {
     final now = DateTime.now();
-    final startDate = DateTime(now.year, now.month, now.day).add(
-      const Duration(days: 1),
-    );
+    final startDate = DateTime(
+      now.year,
+      now.month,
+      now.day,
+    ).add(const Duration(days: 1));
 
     return [
       DoctorAvailability(
@@ -125,6 +133,10 @@ class DoctorModel {
       'clinicLongitude': clinicLongitude,
       'bio': bio,
       'upiId': upiId,
+      'bankAccountHolder': bankAccountHolder,
+      'bankName': bankName,
+      'bankAccountNumber': bankAccountNumber,
+      'bankIfscCode': bankIfscCode,
       'profileImageData': profileImageData,
       'consultationFee': consultationFee,
       'availability': availability.map((slot) => slot.toMap()).toList(),
@@ -151,6 +163,10 @@ class DoctorModel {
       clinicLongitude: (map['clinicLongitude'] as num?)?.toDouble(),
       bio: map['bio']?.toString(),
       upiId: map['upiId']?.toString(),
+      bankAccountHolder: map['bankAccountHolder']?.toString(),
+      bankName: map['bankName']?.toString(),
+      bankAccountNumber: map['bankAccountNumber']?.toString(),
+      bankIfscCode: map['bankIfscCode']?.toString(),
       profileImageData: map['profileImageData']?.toString(),
       consultationFee: (map['consultationFee'] as num?)?.toDouble() ?? 500,
       availability: (map['availability'] as List<dynamic>?)

@@ -6,6 +6,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/firebase/firebase_state.dart';
 import '../../models/patient_model.dart';
 import '../auth/unified_login_screen.dart';
 
@@ -20,6 +21,9 @@ class PatientRegistrationScreen extends StatefulWidget {
 class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
   final _formKey = GlobalKey<FormState>();
   final ImagePicker _imagePicker = ImagePicker();
+  final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  final _usernamePattern = RegExp(r'^[a-zA-Z0-9_]{4,20}$');
+  final _phonePattern = RegExp(r'^[0-9]{7,15}$');
 
   final name = TextEditingController();
   final dob = TextEditingController();
@@ -80,10 +84,11 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
       profileImageData: profileImageData,
     );
 
-    final usernameTaken = AppState.patients.any(
-      (existing) => existing.username == patient.username,
+    final usernameTaken = await FirestoreDataService.instance.usernameExists(
+      patient.username,
     );
     if (usernameTaken) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Username already exists. Try another one.")),
       );
@@ -93,13 +98,13 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
     try {
       await FirestoreDataService.instance.savePatient(patient);
       await FirestoreDataService.instance.syncAllToAppState();
-    } catch (_) {
+    } catch (error) {
       AppState.patients.add(patient);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              "Saved locally. Firebase sync is not available right now.",
+              "Saved locally only. ${firebaseUnavailableReason ?? error.toString()}",
             ),
           ),
         );
@@ -183,11 +188,17 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
                           email,
                           "Email",
                           keyboardType: TextInputType.emailAddress,
+                          extraValidator: (value) => _emailPattern.hasMatch(value)
+                              ? null
+                              : "Enter a valid email",
                         ),
                         _buildField(
                           phone,
                           "Phone number",
                           keyboardType: TextInputType.phone,
+                          extraValidator: (value) => _phonePattern.hasMatch(value)
+                              ? null
+                              : "Enter a valid phone number",
                         ),
                         const SizedBox(height: 8),
                         const Text(
@@ -199,8 +210,21 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
                           ),
                         ),
                         const SizedBox(height: 16),
-                        _buildField(username, "Username"),
-                        _buildField(password, "Password", obscure: true),
+                        _buildField(
+                          username,
+                          "Username",
+                          extraValidator: (value) => _usernamePattern.hasMatch(value)
+                              ? null
+                              : "Use 4-20 letters, numbers, or _",
+                        ),
+                        _buildField(
+                          password,
+                          "Password",
+                          obscure: true,
+                          extraValidator: (value) => value.length >= 6
+                              ? null
+                              : "Password must be at least 6 characters",
+                        ),
                         const SizedBox(height: 10),
                         ElevatedButton(
                           onPressed: _register,
@@ -264,6 +288,7 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
     int maxLines = 1,
     Widget? suffixIcon,
     TextInputType? keyboardType,
+    String? Function(String value)? extraValidator,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -274,8 +299,11 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
         onTap: onTap,
         maxLines: maxLines,
         keyboardType: keyboardType,
-        validator: (value) =>
-            value == null || value.trim().isEmpty ? "Required" : null,
+        validator: (value) {
+          final trimmed = value?.trim() ?? '';
+          if (trimmed.isEmpty) return "Required";
+          return extraValidator?.call(trimmed);
+        },
         decoration: InputDecoration(
           labelText: label,
           suffixIcon: suffixIcon,

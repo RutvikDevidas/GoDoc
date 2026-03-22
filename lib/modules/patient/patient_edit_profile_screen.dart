@@ -19,6 +19,8 @@ class PatientEditProfileScreen extends StatefulWidget {
 class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
   final ImagePicker _imagePicker = ImagePicker();
+  final _emailPattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
+  final _phonePattern = RegExp(r'^[0-9]{7,15}$');
 
   late final TextEditingController name;
   late final TextEditingController username;
@@ -70,7 +72,6 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     widget.patient.name = name.text.trim();
-    widget.patient.username = username.text.trim();
     widget.patient.dob = dob.text.trim();
     widget.patient.address = address.text.trim();
     widget.patient.email = email.text.trim();
@@ -173,15 +174,34 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
                 ),
                 const SizedBox(height: 16),
                 _buildField(name, "Full name"),
-                _buildField(username, "Username"),
+                _buildField(
+                  username,
+                  "Username",
+                  readOnly: true,
+                  helperText: "Username cannot be changed after registration.",
+                ),
                 _buildField(
                   dob,
                   "Date of birth",
                   readOnly: true,
                   onTap: _pickDate,
                 ),
-                _buildField(email, "Email", keyboardType: TextInputType.emailAddress),
-                _buildField(phone, "Phone number", keyboardType: TextInputType.phone),
+                _buildField(
+                  email,
+                  "Email",
+                  keyboardType: TextInputType.emailAddress,
+                  extraValidator: (value) => _emailPattern.hasMatch(value)
+                      ? null
+                      : "Enter a valid email",
+                ),
+                _buildField(
+                  phone,
+                  "Phone number",
+                  keyboardType: TextInputType.phone,
+                  extraValidator: (value) => _phonePattern.hasMatch(value)
+                      ? null
+                      : "Enter a valid phone number",
+                ),
                 _buildField(address, "Address", maxLines: 3),
                 const SizedBox(height: 8),
                 const Text(
@@ -308,6 +328,8 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
     bool readOnly = false,
     VoidCallback? onTap,
     TextInputType? keyboardType,
+    String? helperText,
+    String? Function(String value)? extraValidator,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -317,10 +339,14 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
         readOnly: readOnly,
         onTap: onTap,
         keyboardType: keyboardType,
-        validator: (value) =>
-            value == null || value.trim().isEmpty ? "Required" : null,
+        validator: (value) {
+          final trimmed = value?.trim() ?? '';
+          if (trimmed.isEmpty) return "Required";
+          return extraValidator?.call(trimmed);
+        },
         decoration: InputDecoration(
           labelText: label,
+          helperText: helperText,
           suffixIcon: readOnly ? const Icon(Icons.calendar_today_rounded) : null,
         ),
       ),

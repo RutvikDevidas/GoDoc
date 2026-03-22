@@ -12,9 +12,14 @@ class AppointmentModel {
   // confirmed
   // rejected
   // rescheduled
+  // cancelled
 
   String? rescheduledDate;
   String? rescheduledTime;
+  bool refundIssued;
+  double refundPercentage;
+  String? refundReason;
+  DateTime? refundedAt;
 
   // Video call state (doctor initiates; patient joins)
   bool callStarted;
@@ -37,6 +42,10 @@ class AppointmentModel {
     this.status = "pending",
     this.rescheduledDate,
     this.rescheduledTime,
+    this.refundIssued = false,
+    this.refundPercentage = 0,
+    this.refundReason,
+    this.refundedAt,
     this.callStarted = false,
     this.callRoom,
     this.callStartedAt,
@@ -57,6 +66,10 @@ class AppointmentModel {
       'status': status,
       'rescheduledDate': rescheduledDate,
       'rescheduledTime': rescheduledTime,
+      'refundIssued': refundIssued,
+      'refundPercentage': refundPercentage,
+      'refundReason': refundReason,
+      'refundedAt': refundedAt?.toIso8601String(),
       'callStarted': callStarted,
       'callRoom': callRoom,
       'callStartedAt': callStartedAt?.toIso8601String(),
@@ -78,6 +91,10 @@ class AppointmentModel {
       status: map['status']?.toString() ?? 'pending',
       rescheduledDate: map['rescheduledDate']?.toString(),
       rescheduledTime: map['rescheduledTime']?.toString(),
+      refundIssued: map['refundIssued'] == true,
+      refundPercentage: (map['refundPercentage'] as num?)?.toDouble() ?? 0,
+      refundReason: map['refundReason']?.toString(),
+      refundedAt: DateTime.tryParse(map['refundedAt']?.toString() ?? ''),
       callStarted: map['callStarted'] == true,
       callRoom: map['callRoom']?.toString(),
       callStartedAt: DateTime.tryParse(map['callStartedAt']?.toString() ?? ''),

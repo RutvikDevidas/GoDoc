@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/firebase/firebase_state.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
 import '../admin/admin_dashboard.dart';
@@ -34,6 +35,13 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
   Future<void> login() async {
     final user = username.text.trim();
     final pass = password.text.trim();
+
+    if (user.isEmpty || pass.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Enter both username and password.")),
+      );
+      return;
+    }
 
     if (user == "admin" && pass == "admin") {
       Navigator.pushReplacement(
@@ -316,6 +324,25 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
               const SizedBox(height: 18),
               const Divider(height: 1),
               const SizedBox(height: 18),
+              if (!firebaseAvailable) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF7E8),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: const Color(0xFFF4D58D)),
+                  ),
+                  child: Text(
+                    "Firebase is offline for this run. $firebaseUnavailableMessage",
+                    style: const TextStyle(
+                      color: AppColors.darkText,
+                      height: 1.4,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+              ],
               const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

@@ -262,6 +262,13 @@ class _BookingScreenState extends State<BookingScreen> {
                 ],
               ),
             ),
+            if (type == "Online") ...[
+              const SizedBox(height: 16),
+              _Panel(
+                title: "Payment details",
+                child: _PaymentDetailsCard(doctor: widget.doctor),
+              ),
+            ],
           ],
         ),
       ),
@@ -512,6 +519,71 @@ class _EmptyBookingState extends StatelessWidget {
           height: 1.5,
           fontWeight: FontWeight.w500,
         ),
+      ),
+    );
+  }
+}
+
+class _PaymentDetailsCard extends StatelessWidget {
+  final DoctorModel doctor;
+
+  const _PaymentDetailsCard({required this.doctor});
+
+  @override
+  Widget build(BuildContext context) {
+    final hasBankDetails =
+        doctor.bankAccountHolder.trim().isNotEmpty ||
+        doctor.bankName.trim().isNotEmpty ||
+        doctor.bankAccountNumber.trim().isNotEmpty ||
+        doctor.bankIfscCode.trim().isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.accent,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Consultation fee: Rs ${doctor.consultationFee.toStringAsFixed(0)}",
+            style: const TextStyle(
+              color: AppColors.darkText,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 10),
+          if (doctor.upiId.trim().isNotEmpty)
+            Text(
+              "UPI ID: ${doctor.upiId}",
+              style: const TextStyle(
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          if (doctor.upiId.trim().isNotEmpty && hasBankDetails)
+            const SizedBox(height: 10),
+          if (hasBankDetails) ...[
+            if (doctor.bankAccountHolder.trim().isNotEmpty)
+              Text("Account holder: ${doctor.bankAccountHolder}"),
+            if (doctor.bankName.trim().isNotEmpty)
+              Text("Bank: ${doctor.bankName}"),
+            if (doctor.bankAccountNumber.trim().isNotEmpty)
+              Text("Account number: ${doctor.bankAccountNumber}"),
+            if (doctor.bankIfscCode.trim().isNotEmpty)
+              Text("IFSC: ${doctor.bankIfscCode}"),
+            const SizedBox(height: 10),
+          ],
+          const Text(
+            "Complete the payment using the details above before confirming your online consultation.",
+            style: TextStyle(
+              color: AppColors.mutedText,
+              height: 1.5,
+            ),
+          ),
+        ],
       ),
     );
   }
