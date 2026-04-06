@@ -2,6 +2,7 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
@@ -24,6 +25,28 @@ class _BookingScreenState extends State<BookingScreen> {
   DoctorAvailability? selectedAvailability;
   String? selectedTime;
   String type = "Offline";
+  bool _isSubmitting = false;
+
+  bool _isSameCalendarDay(DateTime first, DateTime second) {
+    return first.year == second.year &&
+        first.month == second.month &&
+        first.day == second.day;
+  }
+
+  DoctorAvailability? _findMatchingAvailability(
+    List<DoctorAvailability> dates,
+    DoctorAvailability? selected,
+  ) {
+    if (selected == null) return null;
+
+    for (final date in dates) {
+      if (_isSameCalendarDay(date.date, selected.date)) {
+        return date;
+      }
+    }
+
+    return null;
+  }
 
   @override
   void initState() {
@@ -65,10 +88,8 @@ class _BookingScreenState extends State<BookingScreen> {
       return;
     }
 
-    selectedAvailability ??= dates.first;
-    if (!dates.contains(selectedAvailability)) {
-      selectedAvailability = dates.first;
-    }
+    selectedAvailability =
+        _findMatchingAvailability(dates, selectedAvailability) ?? dates.first;
 
     final times = _availableTimesFor(selectedAvailability!);
     if (times.isEmpty) {
@@ -82,32 +103,301 @@ class _BookingScreenState extends State<BookingScreen> {
     }
   }
 
-  AppointmentModel _buildAppointment() {
+  AppointmentModel _buildAppointment({
+    required String paymentStatus,
+    String? paymentMethod,
+    String? paymentReference,
+    DateTime? paymentPaidAt,
+  }) {
     return AppointmentModel(
-      id: Random().nextInt(99999).toString(),
+      id:
+          "appt-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(900) + 100}",
       doctorUsername: widget.doctor.username,
       patientUsername: widget.patient.username,
       date: _formatAppointmentDate(selectedAvailability!.date),
       time: selectedTime!,
       type: type,
+      paymentStatus: paymentStatus,
+      paymentMethod: paymentMethod,
+      paymentReference: paymentReference,
+      paymentAmount: widget.doctor.consultationFee,
+      paymentPaidAt: paymentPaidAt,
     );
   }
 
-  Future<void> _submitBooking() async {
-    if (selectedAvailability == null || selectedTime == null) return;
+  bool get _onlinePaymentConfigured => widget.doctor.upiId.trim().isNotEmpty;
 
-    final appointment = _buildAppointment();
+  bool _hasRequiredPayment(AppointmentModel appointment) {
+    if (appointment.type.toLowerCase() != 'online') {
+      return true;
+    }
 
-    // Note: payment processing is not implemented yet.
-    // Booking will proceed immediately for both offline and online appointments.
-    await FirestoreDataService.instance.saveAppointment(appointment);
-    await FirestoreDataService.instance.syncAllToAppState();
-    AppState.notifications.add(
-      "New appointment request from ${widget.patient.name}",
+    return appointment.paymentStatus.toLowerCase() == 'paid' &&
+        (appointment.paymentReference?.trim().isNotEmpty ?? false);
+  }
+
+  Uri _buildUpiPaymentUri(String reference) {
+    return Uri(
+      scheme: 'upi',
+      host: 'pay',
+      queryParameters: {
+        'pa': widget.doctor.upiId.trim(),
+        'pn': widget.doctor.name.trim(),
+        'am': widget.doctor.consultationFee.toStringAsFixed(2),
+        'cu': 'INR',
+        'tn':
+            'GoDoc consultation for ${widget.patient.name} (${reference.trim()})',
+        'tr': reference.trim(),
+      },
     );
+  }
 
-    if (!mounted) return;
-    Navigator.pop(context, true);
+  Future<String?> _showPaymentSheet() async {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final suggestedReference =
+            'PAY-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(900) + 100}';
+        final referenceController = TextEditingController(
+          text: suggestedReference,
+        );
+        var upiLaunchAttempted = false;
+        var upiLaunchSucceeded = false;
+
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            Future<void> openUpiApp() async {
+              final reference = referenceController.text.trim().isEmpty
+                  ? suggestedReference
+                  : referenceController.text.trim();
+              referenceController.text = reference;
+
+              final launched = await launchUrl(
+                _buildUpiPaymentUri(reference),
+                mode: LaunchMode.platformDefault,
+              );
+
+              if (!context.mounted) return;
+
+              setModalState(() {
+                upiLaunchAttempted = true;
+                upiLaunchSucceeded = launched;
+              });
+
+              if (!launched) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text(
+                      'No UPI app was opened. You can still complete payment and enter the reference manually.',
+                    ),
+                  ),
+                );
+              }
+            }
+
+            return SafeArea(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  20,
+                  20,
+                  28 + MediaQuery.of(context).viewInsets.bottom,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'UPI payment',
+                      style: TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.darkText,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      'Pay Rs ${widget.doctor.consultationFee.toStringAsFixed(0)} to ${widget.doctor.name} for this online consultation. Open your UPI app, complete the transfer, then confirm the payment reference here.',
+                      style: const TextStyle(
+                        color: AppColors.mutedText,
+                        height: 1.5,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    _PaymentPreviewRow(
+                      label: 'Doctor UPI',
+                      value: widget.doctor.upiId,
+                    ),
+                    _PaymentPreviewRow(
+                      label: 'Amount',
+                      value:
+                          'Rs ${widget.doctor.consultationFee.toStringAsFixed(0)}',
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: referenceController,
+                      decoration: const InputDecoration(
+                        labelText: 'Payment reference',
+                        hintText: 'Enter UPI transaction ID / reference',
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'Tip: keep the suggested reference or replace it with the final transaction ID shown by your payment app.',
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        height: 1.4,
+                      ),
+                    ),
+                    if (upiLaunchAttempted) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        upiLaunchSucceeded
+                            ? 'UPI app opened. Complete the payment there, then come back and confirm.'
+                            : 'No UPI app opened on this device. After paying another way, enter the payment reference and confirm.',
+                        style: TextStyle(
+                          color: upiLaunchSucceeded
+                              ? AppColors.primary
+                              : Colors.orange.shade800,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: openUpiApp,
+                        child: const Text('Open UPI app'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: () {
+                          final reference = referenceController.text.trim();
+                          if (reference.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Enter the payment reference before confirming payment.',
+                                ),
+                              ),
+                            );
+                            return;
+                          }
+
+                          Navigator.pop(context, reference);
+                        },
+                        child: const Text('I have completed payment'),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<void> bookAppointment() async {
+    if (selectedAvailability == null || selectedTime == null) return;
+    if (_isSubmitting) return;
+    if (type == 'Online' && !_onlinePaymentConfigured) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Online consultation is unavailable because the doctor has not added payment details yet.',
+          ),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      String paymentStatus = 'pay_on_visit';
+      String? paymentMethod;
+      String? paymentReference;
+      DateTime? paymentPaidAt;
+
+      if (type == 'Online') {
+        final paymentRef = await _showPaymentSheet();
+        if (paymentRef == null) {
+          return;
+        }
+
+        paymentStatus = 'paid';
+        paymentMethod = 'upi';
+        paymentReference = paymentRef;
+        paymentPaidAt = DateTime.now();
+      }
+
+      final appointment = _buildAppointment(
+        paymentStatus: paymentStatus,
+        paymentMethod: paymentMethod,
+        paymentReference: paymentReference,
+        paymentPaidAt: paymentPaidAt,
+      );
+
+      if (!_hasRequiredPayment(appointment)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Payment is compulsory for online consultation. Complete payment to continue.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      await FirestoreDataService.instance.saveAppointment(appointment);
+
+      try {
+        await FirestoreDataService.instance.syncAllToAppState();
+      } catch (_) {}
+      AppState.doctorNotifications.add(
+        "New appointment request from ${widget.patient.name}",
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Appointment booked successfully.")),
+        );
+        Navigator.pop(context, true);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Could not save appointment: $error")),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSubmitting = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _submitBooking() async {
+    await bookAppointment();
   }
 
   @override
@@ -192,7 +482,12 @@ class _BookingScreenState extends State<BookingScreen> {
 
                           return _DateChoice(
                             date: slot.date,
-                            isSelected: selectedAvailability == slot,
+                            isSelected:
+                                selectedAvailability != null &&
+                                _isSameCalendarDay(
+                                  selectedAvailability!.date,
+                                  slot.date,
+                                ),
                             onTap: () {
                               setState(() {
                                 selectedAvailability = slot;
@@ -254,7 +549,7 @@ class _BookingScreenState extends State<BookingScreen> {
                   const SizedBox(height: 12),
                   _TypeTile(
                     title: "Online consultation",
-                    subtitle: "Pay with UPI and continue in your installed app.",
+                    subtitle: "Payment is compulsory before the booking is created.",
                     icon: Icons.videocam_outlined,
                     isSelected: type == "Online",
                     onTap: () => setState(() => type = "Online"),
@@ -283,9 +578,13 @@ class _BookingScreenState extends State<BookingScreen> {
               borderRadius: BorderRadius.circular(20),
             ),
           ),
-          onPressed: dates.isEmpty ? null : _submitBooking,
+          onPressed: dates.isEmpty || _isSubmitting ? null : _submitBooking,
           child: Text(
-            type == "Online" ? "Proceed to Payment" : "Book Appointment",
+            _isSubmitting
+                ? "Saving..."
+                : type == "Online"
+                ? "Pay & Book Appointment"
+                : "Book Appointment",
             style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
           ),
         ),
@@ -345,12 +644,33 @@ class _DateChoice extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(18),
-      child: Ink(
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
         width: 96,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primary : AppColors.accent,
+          gradient: isSelected
+              ? const LinearGradient(
+                  colors: [Color(0xFF123C73), AppColors.primary],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          color: isSelected ? null : AppColors.accent,
           borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: isSelected ? AppColors.primary : AppColors.border,
+            width: isSelected ? 2 : 1,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: AppColors.primary.withOpacity(0.22),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ]
+              : const [],
         ),
         child: Column(
           children: [
@@ -577,10 +897,48 @@ class _PaymentDetailsCard extends StatelessWidget {
             const SizedBox(height: 10),
           ],
           const Text(
-            "Complete the payment using the details above before confirming your online consultation.",
+            "Payment is compulsory for online consultations. The booking is created only after payment is marked successful.",
             style: TextStyle(
               color: AppColors.mutedText,
               height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PaymentPreviewRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _PaymentPreviewRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 88,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.mutedText,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],

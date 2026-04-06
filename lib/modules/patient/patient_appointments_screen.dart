@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
@@ -17,9 +19,30 @@ class PatientAppointmentsScreen extends StatefulWidget {
 }
 
 class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
+  StreamSubscription<List<AppointmentModel>>? _appointmentSubscription;
+
   List<AppointmentModel> get myAppointments => AppState.appointments
       .where((a) => a.patientUsername == widget.patient.username)
       .toList();
+
+  @override
+  void initState() {
+    super.initState();
+    _appointmentSubscription = FirestoreDataService.instance
+        .watchAppointments(patientUsername: widget.patient.username)
+        .listen((appointments) {
+          AppState.appointments = appointments;
+          if (mounted) {
+            setState(() {});
+          }
+        });
+  }
+
+  @override
+  void dispose() {
+    _appointmentSubscription?.cancel();
+    super.dispose();
+  }
 
   Future<void> _joinVideoCall(AppointmentModel appt) async {
     if (appt.callRoom == null || appt.callRoom!.isEmpty) return;
@@ -146,7 +169,7 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
                         ? () => _joinVideoCall(appt)
                         : null,
                     onGiveFeedback:
-                        appt.status == "confirmed" && !appt.feedbackSubmitted
+                        appt.status == "completed" && !appt.feedbackSubmitted
                         ? () => _showFeedbackDialog(appt)
                         : null,
                   ),
@@ -162,6 +185,8 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
         return Colors.green.shade200;
       case "rejected":
         return Colors.red.shade200;
+      case "completed":
+        return Colors.blue.shade200;
       case "rescheduled":
         return Colors.orange.shade200;
       case "cancelled":
@@ -271,6 +296,50 @@ class _AppointmentCard extends StatelessWidget {
               ),
             ],
           ),
+          const SizedBox(height: 16),
+          const Divider(height: 1),
+          const SizedBox(height: 14),
+          const Text(
+            "Payment",
+            style: TextStyle(
+              color: AppColors.darkText,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 10,
+            runSpacing: 10,
+            children: [
+              _MetaPill(
+                icon: Icons.payments_outlined,
+                label: appointment.paymentStatus,
+              ),
+              _MetaPill(
+                icon: Icons.currency_rupee_rounded,
+                label: appointment.paymentAmount.toStringAsFixed(0),
+              ),
+              if (appointment.paymentMethod?.isNotEmpty == true)
+                _MetaPill(
+                  icon: Icons.account_balance_wallet_outlined,
+                  label: appointment.paymentMethod!,
+                ),
+            ],
+          ),
+          if (appointment.paymentReference?.isNotEmpty == true) ...[
+            const SizedBox(height: 8),
+            Text(
+              "Reference: ${appointment.paymentReference}",
+              style: const TextStyle(color: AppColors.mutedText),
+            ),
+          ],
+          if (appointment.paymentPaidAt != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              "Paid at: ${appointment.paymentPaidAt!.toLocal()}".split('.').first,
+              style: const TextStyle(color: AppColors.mutedText),
+            ),
+          ],
           if (appointment.status == "rescheduled") ...[
             const SizedBox(height: 16),
             const Divider(height: 1),
@@ -355,7 +424,7 @@ class _AppointmentCard extends StatelessWidget {
           ],
 
           if (onGiveFeedback != null &&
-              appointment.status == "confirmed" &&
+              appointment.status == "completed" &&
               !appointment.feedbackSubmitted)
             ElevatedButton(
               onPressed: onGiveFeedback,
@@ -363,6 +432,15 @@ class _AppointmentCard extends StatelessWidget {
                 backgroundColor: AppColors.primary,
               ),
               child: const Text('Give feedback'),
+            ),
+
+          if (appointment.status == "confirmed" && !appointment.feedbackSubmitted)
+            const Text(
+              'Feedback becomes available after the doctor marks the appointment as completed.',
+              style: TextStyle(
+                color: AppColors.mutedText,
+                height: 1.4,
+              ),
             ),
 
           if (appointment.feedbackSubmitted)

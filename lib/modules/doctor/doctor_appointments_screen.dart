@@ -24,13 +24,29 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
       .toList();
 
   Future<void> confirmAppointment(AppointmentModel appt) async {
+    final requiresOnlinePayment = appt.type.toLowerCase() == "online";
+    final hasOnlinePayment =
+        appt.paymentStatus.toLowerCase() == "paid" &&
+        (appt.paymentReference?.trim().isNotEmpty ?? false);
+
+    if (requiresOnlinePayment && !hasOnlinePayment) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            "Online consultation cannot be confirmed until payment is completed.",
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
       appt.status = "confirmed";
     });
 
     await FirestoreDataService.instance.saveAppointment(appt);
     await FirestoreDataService.instance.syncAllToAppState();
-    AppState.notifications.add(
+    AppState.patientNotifications.add(
       "Your appointment has been confirmed by Dr. ${widget.doctor.name}.",
     );
   }
@@ -46,7 +62,7 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
 
     await FirestoreDataService.instance.saveAppointment(appt);
     await FirestoreDataService.instance.syncAllToAppState();
-    AppState.notifications.add(
+    AppState.patientNotifications.add(
       appt.type.toLowerCase() == "online"
           ? "Your online consultation was rejected. A 100% fee refund has been issued."
           : "Your appointment has been rejected.",
@@ -64,7 +80,7 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
 
     await FirestoreDataService.instance.saveAppointment(appt);
     await FirestoreDataService.instance.syncAllToAppState();
-    AppState.notifications.add(
+    AppState.patientNotifications.add(
       appt.type.toLowerCase() == "online"
           ? "Your online consultation was cancelled. A 100% fee refund has been issued."
           : "Your appointment has been cancelled by the doctor.",
@@ -86,7 +102,22 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
 
     await FirestoreDataService.instance.saveAppointment(appt);
     await FirestoreDataService.instance.syncAllToAppState();
-    AppState.notifications.add("Your appointment has been rescheduled");
+    AppState.patientNotifications.add("Your appointment has been rescheduled");
+  }
+
+  Future<void> completeAppointment(AppointmentModel appt) async {
+    setState(() {
+      appt.status = "completed";
+      appt.completedAt = DateTime.now();
+      appt.callStarted = false;
+      appt.callEndedAt ??= appt.completedAt;
+    });
+
+    await FirestoreDataService.instance.saveAppointment(appt);
+    await FirestoreDataService.instance.syncAllToAppState();
+    AppState.patientNotifications.add(
+      "Your appointment with Dr. ${widget.doctor.name} has been marked completed. You can now leave feedback.",
+    );
   }
 
   void _applyFullRefundIfOnline(
@@ -118,8 +149,20 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
     appt.callStartedAt = DateTime.now();
     appt.callEndedAt = null;
 
-    // Persist the call state so patient can join.
-    await FirestoreDataService.instance.saveAppointment(appt);
+    try {
+      // Persist the call state so patient can join.
+      await FirestoreDataService.instance.saveAppointment(appt);
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Saved call state locally, but database sync failed: $error',
+            ),
+          ),
+        );
+      }
+    }
 
     if (!mounted) return;
 
@@ -137,7 +180,9 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
     // Mark call ended when doctor leaves the call screen.
     appt.callEndedAt = DateTime.now();
     appt.callStarted = false;
-    await FirestoreDataService.instance.saveAppointment(appt);
+    try {
+      await FirestoreDataService.instance.saveAppointment(appt);
+    } catch (_) {}
 
     // Refresh UI in case state changed elsewhere
     if (!mounted) return;
@@ -173,7 +218,6 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Appointments")),
       body: ListView.builder(
         padding: const EdgeInsets.all(20),
         itemCount: myAppointments.length,
@@ -216,6 +260,12 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                 Text("Date: ${appt.date}"),
                 Text("Time: ${appt.time}"),
                 Text("Type: ${appt.type}"),
+                Text("Payment: ${appt.paymentStatus}"),
+                Text(
+                  "Amount: Rs ${appt.paymentAmount.toStringAsFixed(0)}",
+                ),
+                if (appt.paymentReference?.isNotEmpty == true)
+                  Text("Reference: ${appt.paymentReference}"),
 
                 if (appt.status == "rescheduled") ...[
                   const SizedBox(height: 8),
@@ -311,8 +361,37 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
                         onPressed: () => cancelAppointment(appt),
                         child: const Text("Cancel Online Consultation"),
                       ),
+                      const SizedBox(height: 10),
+                      OutlinedButton(
+                        onPressed: () => completeAppointment(appt),
+                        child: const Text("Completed"),
+                      ),
                     ],
                   ),
+
+                if (appt.status == "confirmed" &&
+                    appt.type.toLowerCase() != "online")
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => completeAppointment(appt),
+                        child: const Text("Completed"),
+                      ),
+                    ],
+                  ),
+
+                if (appt.status == "completed") ...[
+                  Text(
+                    "Completed at: ${appt.completedAt?.toLocal().toString().split('.').first ?? '-'}",
+                  ),
+                  if (appt.feedbackSubmitted) ...[
+                    const SizedBox(height: 8),
+                    Text("Patient feedback: ${appt.feedbackRating ?? '-'} / 5"),
+                    if (appt.feedbackComments?.isNotEmpty == true)
+                      Text("Comments: ${appt.feedbackComments}"),
+                  ],
+                ],
               ],
             ),
           );
@@ -327,6 +406,8 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
         return Colors.green.shade200;
       case "rejected":
         return Colors.red.shade200;
+      case "completed":
+        return Colors.blue.shade200;
       case "rescheduled":
         return Colors.orange.shade200;
       case "cancelled":

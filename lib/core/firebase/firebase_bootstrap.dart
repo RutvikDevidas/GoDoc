@@ -1,5 +1,6 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 
 import 'firestore_data_service.dart';
 import 'firebase_state.dart';
@@ -24,12 +25,23 @@ Future<void> bootstrapFirebase() async {
       'Firebase initialized successfully on ${DefaultFirebaseOptions.currentPlatformName}.',
     );
 
+    if (kIsWeb) {
+      // Firestore requests on localhost can hang with WebChannel on some
+      // networks or browser setups. Long-polling is more reliable here.
+      FirebaseFirestore.instance.settings = const Settings(
+        persistenceEnabled: false,
+        webExperimentalForceLongPolling: true,
+        webExperimentalAutoDetectLongPolling: false,
+      );
+    }
+
     try {
-      // Seed local app state into Firestore (if empty) and keep app state in sync.
-      await FirestoreDataService.instance.seedAndSync();
+      // Avoid blocking startup if the first Firestore sync is slow.
+      await FirestoreDataService.instance
+          .seedAndSync()
+          .timeout(const Duration(seconds: 10));
     } catch (error) {
-      firebaseAvailable = false;
-      firebaseUnavailableReason = 'Firestore sync failed: $error';
+      firebaseUnavailableReason = 'Initial Firestore sync skipped: $error';
       debugPrint('Firestore sync failed: $error');
     }
   } catch (error) {

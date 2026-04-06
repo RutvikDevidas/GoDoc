@@ -27,6 +27,13 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   Position? _userPosition;
   String? _error;
   bool _loading = true;
+  bool _locationPermissionGranted = false;
+  bool _permissionPermanentlyDenied = false;
+
+  bool _hasLocationPermission(LocationPermission permission) {
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
+  }
 
   @override
   void initState() {
@@ -38,17 +45,20 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     setState(() {
       _loading = true;
       _error = null;
+      _permissionPermanentlyDenied = false;
     });
 
     try {
       final position = await _determinePosition();
       setState(() {
         _userPosition = position;
+        _locationPermissionGranted = true;
       });
       await _moveCameraToBounds();
     } catch (e) {
       setState(() {
         _error = e.toString();
+        _locationPermissionGranted = false;
       });
     } finally {
       setState(() {
@@ -58,31 +68,41 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   }
 
   Future<Position> _determinePosition() async {
-    bool serviceEnabled;
-    LocationPermission permission;
-
-    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       throw Exception('Location services are disabled.');
     }
 
-    permission = await Geolocator.checkPermission();
+    var permission = await Geolocator.checkPermission();
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
+        _locationPermissionGranted = false;
         throw Exception('Location permissions are denied');
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
+      _permissionPermanentlyDenied = true;
+      _locationPermissionGranted = false;
       throw Exception(
         'Location permissions are permanently denied, we cannot request permissions.',
       );
     }
 
-    return await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+    _locationPermissionGranted = _hasLocationPermission(permission);
+
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(const Duration(seconds: 12));
+    } catch (_) {
+      final lastKnown = await Geolocator.getLastKnownPosition();
+      if (lastKnown != null) {
+        return lastKnown;
+      }
+      rethrow;
+    }
   }
 
   Future<void> _moveCameraToBounds() async {
@@ -90,6 +110,17 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
 
     final clinic = LatLng(widget.clinicLatitude, widget.clinicLongitude);
     final user = LatLng(_userPosition!.latitude, _userPosition!.longitude);
+    final latitudeDelta = (clinic.latitude - user.latitude).abs();
+    final longitudeDelta = (clinic.longitude - user.longitude).abs();
+
+    final controller = await _controller.future;
+
+    if (latitudeDelta < 0.0005 && longitudeDelta < 0.0005) {
+      await controller.animateCamera(
+        CameraUpdate.newLatLngZoom(clinic, 17),
+      );
+      return;
+    }
 
     final bounds = LatLngBounds(
       southwest: LatLng(
@@ -102,8 +133,25 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       ),
     );
 
-    final controller = await _controller.future;
-    controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 64));
+    try {
+      await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 64));
+    } catch (_) {
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(clinic, 14));
+    }
+  }
+
+  Future<void> _openLocationAccess() async {
+    if (_permissionPermanentlyDenied) {
+      await Geolocator.openAppSettings();
+      return;
+    }
+
+    if (!await Geolocator.isLocationServiceEnabled()) {
+      await Geolocator.openLocationSettings();
+      return;
+    }
+
+    await _loadUserLocation();
   }
 
   double get _distanceMeters {
@@ -151,11 +199,14 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       Polyline(
         polylineId: const PolylineId('route'),
         points: [
-          LatLng(widget.clinicLatitude, widget.clinicLongitude),
           LatLng(_userPosition!.latitude, _userPosition!.longitude),
+          LatLng(widget.clinicLatitude, widget.clinicLongitude),
         ],
         color: Theme.of(context).colorScheme.primary,
-        width: 5,
+        width: 6,
+        geodesic: true,
+        startCap: Cap.roundCap,
+        endCap: Cap.roundCap,
       ),
     };
   }
@@ -183,8 +234,8 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
               ),
               markers: _markers,
               polylines: _polylines,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
+              myLocationEnabled: _locationPermissionGranted,
+              myLocationButtonEnabled: _locationPermissionGranted,
               onMapCreated: (controller) {
                 if (!_controller.isCompleted) {
                   _controller.complete(controller);
@@ -200,17 +251,46 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
               ),
             ),
           if (_error != null)
-            Positioned.fill(
-              child: Container(
-                color: Colors.black54,
-                child: Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24.0),
-                    child: Text(
-                      _error!,
-                      style: const TextStyle(color: Colors.white),
-                      textAlign: TextAlign.center,
-                    ),
+            Positioned(
+              left: 16,
+              right: 16,
+              top: 16,
+              child: Material(
+                color: Colors.transparent,
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.black87,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          ElevatedButton(
+                            onPressed: _openLocationAccess,
+                            child: Text(
+                              _permissionPermanentlyDenied
+                                  ? 'Open app settings'
+                                  : 'Open location settings',
+                            ),
+                          ),
+                          OutlinedButton(
+                            onPressed: _loadUserLocation,
+                            child: const Text('Retry'),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
                 ),
               ),

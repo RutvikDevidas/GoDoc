@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../data/app_state.dart';
+import '../data/demo_seed_data.dart';
 import 'firebase_state.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
@@ -11,15 +12,17 @@ class FirestoreDataService {
 
   static final FirestoreDataService instance = FirestoreDataService._();
   FirebaseFirestore get _firestore => FirebaseFirestore.instance;
+  DocumentReference<Map<String, dynamic>> get _godocRoot =>
+      _firestore.collection('GODOC-app').doc('data');
 
   CollectionReference<Map<String, dynamic>> get _doctors =>
-      _firestore.collection('doctors');
+      _godocRoot.collection('doctors');
 
   CollectionReference<Map<String, dynamic>> get _patients =>
-      _firestore.collection('patients');
+      _godocRoot.collection('patients');
 
   CollectionReference<Map<String, dynamic>> get _appointments =>
-      _firestore.collection('appointments');
+      _godocRoot.collection('appointments');
 
   String _normalizedUsername(String username) => username.trim().toLowerCase();
 
@@ -168,6 +171,11 @@ class FirestoreDataService {
       return;
     }
 
+    await _ensureDocumentExists(
+      collection: _doctors,
+      id: DemoSeedData.demoDoctor.username,
+      data: DemoSeedData.demoDoctor.toMap(),
+    );
     await _seedCollectionIfEmpty<DoctorModel>(
       collection: _doctors,
       items: AppState.doctors,
@@ -301,6 +309,61 @@ class FirestoreDataService {
     return patientSnapshot.docs.any(
       (doc) => _normalizedUsername(doc.id) != normalizedExcludedPatient,
     );
+  }
+
+  Future<String?> duplicateDoctorCredentialLabel({
+    required String prNumber,
+    required String nmcNumber,
+    required String licenceNumber,
+    String? excludeDoctorUsername,
+  }) async {
+    String normalize(String value) => value.trim().toLowerCase();
+
+    final normalizedPrNumber = normalize(prNumber);
+    final normalizedNmcNumber = normalize(nmcNumber);
+    final normalizedLicenceNumber = normalize(licenceNumber);
+    final normalizedExcludedDoctor = excludeDoctorUsername == null
+        ? null
+        : _normalizedUsername(excludeDoctorUsername);
+
+    bool matchesExcludedDoctor(DoctorModel doctor) {
+      return normalizedExcludedDoctor != null &&
+          _normalizedUsername(doctor.username) == normalizedExcludedDoctor;
+    }
+
+    for (final doctor in AppState.doctors) {
+      if (matchesExcludedDoctor(doctor)) continue;
+
+      if (normalize(doctor.prNumber) == normalizedPrNumber) {
+        return 'PR number';
+      }
+      if (normalize(doctor.nmcNumber) == normalizedNmcNumber) {
+        return 'NMC number';
+      }
+      if (normalize(doctor.licenceNumber) == normalizedLicenceNumber) {
+        return 'Licence number';
+      }
+    }
+
+    if (!firebaseAvailable) return null;
+
+    final doctorSnapshot = await _doctors.limit(500).get();
+    for (final doc in doctorSnapshot.docs) {
+      final doctor = DoctorModel.fromMap(doc.data());
+      if (matchesExcludedDoctor(doctor)) continue;
+
+      if (normalize(doctor.prNumber) == normalizedPrNumber) {
+        return 'PR number';
+      }
+      if (normalize(doctor.nmcNumber) == normalizedNmcNumber) {
+        return 'NMC number';
+      }
+      if (normalize(doctor.licenceNumber) == normalizedLicenceNumber) {
+        return 'Licence number';
+      }
+    }
+
+    return null;
   }
 
   Future<void> saveDoctor(DoctorModel doctor) async {
@@ -463,6 +526,17 @@ class FirestoreDataService {
     }
 
     await _appointments.doc(appointmentId).delete();
+  }
+
+  Future<void> _ensureDocumentExists({
+    required CollectionReference<Map<String, dynamic>> collection,
+    required String id,
+    required Map<String, dynamic> data,
+  }) async {
+    final document = await collection.doc(id).get();
+    if (document.exists) return;
+
+    await collection.doc(id).set(data);
   }
 
   Future<void> _seedCollectionIfEmpty<T>({

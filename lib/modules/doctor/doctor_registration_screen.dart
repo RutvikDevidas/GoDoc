@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
@@ -214,29 +215,13 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     });
   }
 
-  Future<void> _submit() async {
+  Future<void> addDoctor() async {
     if (!_validateStep(2)) return;
 
-    final doctor = DoctorModel(
-      username: username.text.trim(),
-      password: password.text.trim(),
-      name: name.text.trim(),
-      dob: dob.text.trim(),
-      prNumber: prNumber.text.trim(),
-      nmcNumber: nmcNumber.text.trim(),
-      licenceNumber: licenceNumber.text.trim(),
-      specialization: selectedSpecialization ?? "",
-      phone: phone.text.trim(),
-      clinicName: clinicName.text.trim(),
-      clinicAddress: clinicAddress.text.trim(),
-      clinicLocation: _clinicLocationLabel,
-      clinicLatitude: selectedLatitude,
-      clinicLongitude: selectedLongitude,
-    );
-
+    // Prevent duplicate usernames before writing the doctor document.
     final usernameTaken = await FirestoreDataService.instance.usernameExists(
-      doctor.username,
-    );
+      username.text.trim(),
+    ).timeout(const Duration(seconds: 8));
     if (usernameTaken) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -246,20 +231,105 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
       return;
     }
 
+    final duplicateCredential =
+        await FirestoreDataService.instance.duplicateDoctorCredentialLabel(
+          prNumber: prNumber.text.trim(),
+          nmcNumber: nmcNumber.text.trim(),
+          licenceNumber: licenceNumber.text.trim(),
+        ).timeout(const Duration(seconds: 8));
+    if (duplicateCredential != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "$duplicateCredential already exists. Please enter a unique value.",
+          ),
+        ),
+      );
+      return;
+    }
+
     try {
-      await FirestoreDataService.instance.saveDoctor(doctor);
-      await FirestoreDataService.instance.syncAllToAppState();
+      // Store the current form values directly from the existing controllers.
+      await FirebaseFirestore.instance
+          .collection("GODOC-app")
+          .doc("data")
+          .collection("doctors")
+          .doc(username.text.trim())
+          .set({
+            "username": username.text.trim(),
+            "password": password.text.trim(),
+            "name": name.text.trim(),
+            "dob": dob.text.trim(),
+            "prNumber": prNumber.text.trim(),
+            "nmcNumber": nmcNumber.text.trim(),
+            "licenceNumber": licenceNumber.text.trim(),
+            "specialization": specialization.text.trim(),
+            "phone": phone.text.trim(),
+            "clinicName": clinicName.text.trim(),
+            "clinicAddress": clinicAddress.text.trim(),
+            "clinicLocation": _clinicLocationLabel,
+            "clinicLatitude": selectedLatitude,
+            "clinicLongitude": selectedLongitude,
+            "bio":
+                "${name.text.trim()} is a trusted ${specialization.text.trim()} offering patient-focused care, clear guidance, and consistent follow-up through ${clinicName.text.trim()}.",
+            "upiId": "${username.text.trim()}@upi",
+            "bankAccountHolder": "",
+            "bankName": "",
+            "bankAccountNumber": "",
+            "bankIfscCode": "",
+            "profileImageData": null,
+            "consultationFee": 500,
+            "availability": [
+              DoctorAvailability(
+                date: DateTime(
+                  DateTime.now().year,
+                  DateTime.now().month,
+                  DateTime.now().day,
+                ).add(const Duration(days: 1)),
+                timeSlots: const ["10:00 AM", "11:00 AM", "01:30 PM"],
+              ),
+              DoctorAvailability(
+                date: DateTime(
+                  DateTime.now().year,
+                  DateTime.now().month,
+                  DateTime.now().day,
+                ).add(const Duration(days: 2)),
+                timeSlots: const ["09:30 AM", "12:00 PM", "03:30 PM"],
+              ),
+              DoctorAvailability(
+                date: DateTime(
+                  DateTime.now().year,
+                  DateTime.now().month,
+                  DateTime.now().day,
+                ).add(const Duration(days: 4)),
+                timeSlots: const ["10:30 AM", "02:00 PM", "05:00 PM"],
+              ),
+            ].map((slot) => slot.toMap()).toList(),
+            "verified": false,
+            "rejected": false,
+            "createdAt": FieldValue.serverTimestamp(),
+            "updatedAt": FieldValue.serverTimestamp(),
+          })
+          .timeout(const Duration(seconds: 8));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Doctor data saved successfully.")),
+        );
+      }
+      try {
+        await FirestoreDataService.instance
+            .syncAllToAppState()
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {}
     } catch (error) {
-      AppState.doctors.add(doctor);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(
-              "Saved locally only. ${firebaseUnavailableReason ?? error.toString()}",
-            ),
+            content: Text("Could not save to Firestore. ${error.toString()}"),
           ),
         );
       }
+      return;
     }
 
     if (!mounted) return;
@@ -328,6 +398,10 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         ),
       ),
     );
+  }
+
+  Future<void> _submit() async {
+    await addDoctor();
   }
 
   String _stepTitle(int step) {

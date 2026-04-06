@@ -9,9 +9,17 @@ class DoctorAvailability {
   }
 
   factory DoctorAvailability.fromMap(Map<String, dynamic> map) {
+    final rawTimeSlots = map['timeSlots'];
+
     return DoctorAvailability(
       date: DateTime.tryParse(map['date']?.toString() ?? '') ?? DateTime.now(),
-      timeSlots: List<String>.from(map['timeSlots'] ?? const <String>[]),
+      timeSlots: rawTimeSlots is List
+          ? rawTimeSlots
+                .where((slot) => slot != null)
+                .map((slot) => slot.toString())
+                .where((slot) => slot.trim().isNotEmpty)
+                .toList()
+          : const <String>[],
     );
   }
 }
@@ -146,6 +154,8 @@ class DoctorModel {
   }
 
   factory DoctorModel.fromMap(Map<String, dynamic> map) {
+    final rawAvailability = map['availability'];
+
     return DoctorModel(
       username: map['username']?.toString() ?? '',
       password: map['password']?.toString() ?? '',
@@ -169,13 +179,16 @@ class DoctorModel {
       bankIfscCode: map['bankIfscCode']?.toString(),
       profileImageData: map['profileImageData']?.toString(),
       consultationFee: (map['consultationFee'] as num?)?.toDouble() ?? 500,
-      availability: (map['availability'] as List<dynamic>?)
-          ?.map(
-            (slot) => DoctorAvailability.fromMap(
-              Map<String, dynamic>.from(slot as Map),
-            ),
-          )
-          .toList(),
+      availability: rawAvailability is List
+          ? rawAvailability
+                .whereType<Map>()
+                .map(
+                  (slot) => DoctorAvailability.fromMap(
+                    Map<String, dynamic>.from(slot),
+                  ),
+                )
+                .toList()
+          : null,
       verified: map['verified'] == true,
       rejected: map['rejected'] == true,
     );

@@ -10,9 +10,16 @@ class AppointmentModel {
   String status;
   // pending
   // confirmed
+  // completed
   // rejected
   // rescheduled
   // cancelled
+
+  String paymentStatus;
+  String? paymentMethod;
+  String? paymentReference;
+  double paymentAmount;
+  DateTime? paymentPaidAt;
 
   String? rescheduledDate;
   String? rescheduledTime;
@@ -20,6 +27,7 @@ class AppointmentModel {
   double refundPercentage;
   String? refundReason;
   DateTime? refundedAt;
+  DateTime? completedAt;
 
   // Video call state (doctor initiates; patient joins)
   bool callStarted;
@@ -40,12 +48,18 @@ class AppointmentModel {
     required this.time,
     required this.type,
     this.status = "pending",
+    this.paymentStatus = "unpaid",
+    this.paymentMethod,
+    this.paymentReference,
+    this.paymentAmount = 0,
+    this.paymentPaidAt,
     this.rescheduledDate,
     this.rescheduledTime,
     this.refundIssued = false,
     this.refundPercentage = 0,
     this.refundReason,
     this.refundedAt,
+    this.completedAt,
     this.callStarted = false,
     this.callRoom,
     this.callStartedAt,
@@ -64,12 +78,18 @@ class AppointmentModel {
       'time': time,
       'type': type,
       'status': status,
+      'paymentStatus': paymentStatus,
+      'paymentMethod': paymentMethod,
+      'paymentReference': paymentReference,
+      'paymentAmount': paymentAmount,
+      'paymentPaidAt': paymentPaidAt?.toIso8601String(),
       'rescheduledDate': rescheduledDate,
       'rescheduledTime': rescheduledTime,
       'refundIssued': refundIssued,
       'refundPercentage': refundPercentage,
       'refundReason': refundReason,
       'refundedAt': refundedAt?.toIso8601String(),
+      'completedAt': completedAt?.toIso8601String(),
       'callStarted': callStarted,
       'callRoom': callRoom,
       'callStartedAt': callStartedAt?.toIso8601String(),
@@ -89,12 +109,18 @@ class AppointmentModel {
       time: map['time']?.toString() ?? '',
       type: map['type']?.toString() ?? '',
       status: map['status']?.toString() ?? 'pending',
+      paymentStatus: map['paymentStatus']?.toString() ?? 'unpaid',
+      paymentMethod: map['paymentMethod']?.toString(),
+      paymentReference: map['paymentReference']?.toString(),
+      paymentAmount: (map['paymentAmount'] as num?)?.toDouble() ?? 0,
+      paymentPaidAt: DateTime.tryParse(map['paymentPaidAt']?.toString() ?? ''),
       rescheduledDate: map['rescheduledDate']?.toString(),
       rescheduledTime: map['rescheduledTime']?.toString(),
       refundIssued: map['refundIssued'] == true,
       refundPercentage: (map['refundPercentage'] as num?)?.toDouble() ?? 0,
       refundReason: map['refundReason']?.toString(),
       refundedAt: DateTime.tryParse(map['refundedAt']?.toString() ?? ''),
+      completedAt: DateTime.tryParse(map['completedAt']?.toString() ?? ''),
       callStarted: map['callStarted'] == true,
       callRoom: map['callRoom']?.toString(),
       callStartedAt: DateTime.tryParse(map['callStartedAt']?.toString() ?? ''),

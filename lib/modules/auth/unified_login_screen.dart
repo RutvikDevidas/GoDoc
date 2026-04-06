@@ -24,6 +24,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
   final password = TextEditingController();
 
   bool isDoctor = false;
+  bool isPasswordVisible = false;
 
   @override
   void dispose() {
@@ -303,10 +304,20 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
               const SizedBox(height: 16),
               TextField(
                 controller: password,
-                obscureText: true,
-                decoration: const InputDecoration(
+                obscureText: !isPasswordVisible,
+                decoration: InputDecoration(
                   labelText: "Password",
-                  prefixIcon: Icon(Icons.lock_outline_rounded),
+                  prefixIcon: const Icon(Icons.lock_outline_rounded),
+                  suffixIcon: IconButton(
+                    onPressed: () {
+                      setState(() => isPasswordVisible = !isPasswordVisible);
+                    },
+                    icon: Icon(
+                      isPasswordVisible
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -324,25 +335,6 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
               const SizedBox(height: 18),
               const Divider(height: 1),
               const SizedBox(height: 18),
-              if (!firebaseAvailable) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFFF7E8),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFF4D58D)),
-                  ),
-                  child: Text(
-                    "Firebase is offline for this run. $firebaseUnavailableMessage",
-                    style: const TextStyle(
-                      color: AppColors.darkText,
-                      height: 1.4,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-              ],
               const Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

@@ -12,8 +12,8 @@ import '../../models/patient_model.dart';
 import '../auth/unified_login_screen.dart';
 import 'doctor_detail_screen.dart';
 import 'patient_appointments_screen.dart';
-import 'patient_notification_screen.dart';
 import 'patient_profile_screen.dart';
+import 'patient_notification_screen.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   final PatientModel patient;
@@ -292,7 +292,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             if (index == 1) {
               _openAppointments();
             } else if (index == 2) {
-              _openNotifications();
+              _openProfile();
             }
           },
           items: const [
@@ -305,8 +305,9 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
               label: "Appointments",
             ),
             BottomNavigationBarItem(
-              icon: Icon(Icons.notifications_none_rounded),
-              label: "Alerts",
+              icon: Icon(Icons.person_outline_rounded),
+              activeIcon: Icon(Icons.person_rounded),
+              label: "Profile",
             ),
           ],
         ),
@@ -378,10 +379,6 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                 _TopActionButton(
                   icon: Icons.notifications_none_rounded,
                   onTap: _openNotifications,
-                ),
-                _TopActionButton(
-                  icon: Icons.person_outline_rounded,
-                  onTap: _openProfile,
                 ),
                 _TopActionButton(icon: Icons.logout_rounded, onTap: _logout),
               ],

@@ -8,7 +8,7 @@ class PatientNotificationsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final notifications = AppState.notifications.reversed.toList();
+    final notifications = AppState.patientNotifications.reversed.toList();
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FC),

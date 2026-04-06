@@ -41,6 +41,8 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
     final pending = appointments.where((item) => item.status == "pending").length;
     final confirmed =
         appointments.where((item) => item.status == "confirmed").length;
+    final completed =
+        appointments.where((item) => item.status == "completed").length;
     final rescheduled =
         appointments.where((item) => item.status == "rescheduled").length;
 
@@ -49,6 +51,7 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
         appointments: appointments,
         pending: pending,
         confirmed: confirmed,
+        completed: completed,
         rescheduled: rescheduled,
         isCompact: isCompact,
       ),
@@ -151,6 +154,7 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
     required List<AppointmentModel> appointments,
     required int pending,
     required int confirmed,
+    required int completed,
     required int rescheduled,
     required bool isCompact,
   }) {
@@ -198,6 +202,14 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
                     caption: "Ready to consult",
                     color: AppColors.success,
                     icon: Icons.check_circle_rounded,
+                  ),
+                  const SizedBox(width: 14),
+                  _MetricCard(
+                    label: "Completed",
+                    value: completed.toString(),
+                    caption: "Waiting for feedback",
+                    color: const Color(0xFF2563EB),
+                    icon: Icons.task_alt_rounded,
                   ),
                   const SizedBox(width: 14),
                   _MetricCard(

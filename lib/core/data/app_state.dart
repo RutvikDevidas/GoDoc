@@ -1,3 +1,4 @@
+import 'demo_seed_data.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
 import '../../models/appointment_model.dart';
@@ -5,7 +6,9 @@ import '../../models/appointment_model.dart';
 class AppState {
   // ================= DOCTORS =================
 
-  static List<DoctorModel> doctors = [];
+  static List<DoctorModel> doctors = List<DoctorModel>.from(
+    DemoSeedData.initialDoctors,
+  );
 
   // ================= PATIENTS =================
 
@@ -15,5 +18,6 @@ class AppState {
 
   static List<AppointmentModel> appointments = [];
 
-  static List<String> notifications = [];
+  static List<String> patientNotifications = [];
+  static List<String> doctorNotifications = [];
 }

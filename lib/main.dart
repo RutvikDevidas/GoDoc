@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'core/firebase/firebase_bootstrap.dart';
@@ -6,8 +8,8 @@ import 'modules/auth/unified_login_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await bootstrapFirebase();
   runApp(const GoDocApp());
+  unawaited(bootstrapFirebase());
 }
 
 class GoDocApp extends StatelessWidget {

@@ -520,6 +520,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final confirmedAppointments = appointments
         .where((appointment) => appointment.status == "confirmed")
         .toList();
+    final completedAppointments = appointments
+        .where((appointment) => appointment.status == "completed")
+        .toList();
     final pendingAppointments = appointments
         .where((appointment) => appointment.status == "pending")
         .toList();
@@ -543,6 +546,25 @@ class _AdminDashboardState extends State<AdminDashboard> {
           count: confirmedAppointments.length,
           emptyMessage: "No confirmed appointments.",
           children: confirmedAppointments
+              .map(
+                (appt) => Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: _AppointmentLogCard(
+                    appointment: appt,
+                    deleteLocked: _isDeletingRecord,
+                    onDelete: () => _deleteAppointment(appt),
+                  ),
+                ),
+              )
+              .toList(),
+        ),
+        const SizedBox(height: 12),
+        _DoctorSection(
+          title: "Completed visits",
+          subtitle: "Appointments finished and ready for patient feedback",
+          count: completedAppointments.length,
+          emptyMessage: "No completed appointments.",
+          children: completedAppointments
               .map(
                 (appt) => Padding(
                   padding: const EdgeInsets.only(bottom: 16),
@@ -1293,6 +1315,7 @@ class _AppointmentLogCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final statusColor = switch (appointment.status) {
       "confirmed" => AppColors.success,
+      "completed" => const Color(0xFF2563EB),
       "rejected" => AppColors.danger,
       "rescheduled" => AppColors.warning,
       _ => AppColors.primary,
@@ -1348,6 +1371,30 @@ class _AppointmentLogCard extends StatelessWidget {
           _DetailRow(label: "Doctor", value: appointment.doctorUsername),
           _DetailRow(label: "Patient", value: appointment.patientUsername),
           _DetailRow(label: "Type", value: appointment.type),
+          _DetailRow(label: "Payment", value: appointment.paymentStatus),
+          _DetailRow(
+            label: "Amount",
+            value: "Rs ${appointment.paymentAmount.toStringAsFixed(0)}",
+          ),
+          if (appointment.paymentMethod?.isNotEmpty == true)
+            _DetailRow(label: "Method", value: appointment.paymentMethod!),
+          if (appointment.paymentReference?.isNotEmpty == true)
+            _DetailRow(
+              label: "Reference",
+              value: appointment.paymentReference!,
+            ),
+          if (appointment.completedAt != null)
+            _DetailRow(
+              label: "Completed",
+              value: appointment.completedAt!.toLocal().toString().split('.').first,
+            ),
+          if (appointment.feedbackSubmitted) ...[
+            _DetailRow(
+              label: "Feedback",
+              value:
+                  "${appointment.feedbackRating ?? '-'} / 5${appointment.feedbackComments?.isNotEmpty == true ? ' - ${appointment.feedbackComments}' : ''}",
+            ),
+          ],
           if (appointment.rescheduledDate != null &&
               appointment.rescheduledTime != null)
             _DetailRow(

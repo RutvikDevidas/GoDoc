@@ -1,8 +1,8 @@
 import 'dart:convert';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
@@ -73,26 +73,17 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
     }
   }
 
-  Future<void> _register() async {
+  Future<void> addPatient() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final patient = PatientModel(
-        username: username.text.trim(),
-        password: password.text.trim(),
-        name: name.text.trim(),
-        dob: dob.text.trim(),
-        address: address.text.trim(),
-        email: email.text.trim(),
-        phone: phone.text.trim(),
-        profileImageData: profileImageData,
-      );
-
       try {
+        // Check whether the entered username already exists.
         final usernameTaken = await FirestoreDataService.instance
-            .usernameExists(patient.username);
+            .usernameExists(username.text.trim())
+            .timeout(const Duration(seconds: 8));
         if (usernameTaken) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
@@ -109,16 +100,47 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
       }
 
       try {
-        await FirestoreDataService.instance.savePatient(patient);
-        await FirestoreDataService.instance.syncAllToAppState();
-      } catch (error) {
-        print('Error saving to Firebase: $error');
-        AppState.patients.add(patient);
+        // Save the patient using the existing controllers and image state.
+        await FirebaseFirestore.instance
+            .collection("GODOC-app")
+            .doc("data")
+            .collection("patients")
+            .doc(username.text.trim())
+            .set({
+              "username": username.text.trim(),
+              "password": password.text.trim(),
+              "name": name.text.trim(),
+              "dob": dob.text.trim(),
+              "address": address.text.trim(),
+              "email": email.text.trim(),
+              "phone": phone.text.trim(),
+              "profileImagePath": null,
+              "profileImageData": profileImageData,
+              "medicalReports": <Map<String, dynamic>>[],
+              "createdAt": FieldValue.serverTimestamp(),
+              "updatedAt": FieldValue.serverTimestamp(),
+            })
+            .timeout(const Duration(seconds: 8));
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Saved locally. ${error.toString()}")),
+            const SnackBar(content: Text("Patient data saved successfully.")),
           );
         }
+        try {
+          await FirestoreDataService.instance.syncAllToAppState().timeout(
+            const Duration(seconds: 8),
+          );
+        } catch (_) {}
+      } catch (error) {
+        print('Error saving to Firebase: $error');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text("Could not save to Firestore. ${error.toString()}"),
+            ),
+          );
+        }
+        return;
       }
 
       if (!mounted) return;
@@ -145,9 +167,16 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text("Error: ${error.toString()}")));
+      }
+    } finally {
+      if (mounted) {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  Future<void> _register() async {
+    await addPatient();
   }
 
   @override
