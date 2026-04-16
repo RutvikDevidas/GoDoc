@@ -4,13 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/constants/app_colors.dart';
-import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
-import '../../core/firebase/firebase_state.dart';
 import '../../models/patient_model.dart';
-import '../auth/unified_login_screen.dart';
 import 'patient_home_screen.dart';
-import 'dart:developer' show log;
 
 class PatientRegistrationScreen extends StatefulWidget {
   const PatientRegistrationScreen({super.key});

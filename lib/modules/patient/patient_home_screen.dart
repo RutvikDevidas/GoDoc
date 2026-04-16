@@ -36,6 +36,18 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   List<DoctorModel> get _verifiedDoctors =>
       AppState.doctors.where((doctor) => doctor.verified).toList();
 
+  List<String> get _availableSpecializations {
+    final specializations = _verifiedDoctors
+        .map((doctor) => doctor.specialization.trim())
+        .where((specialization) => specialization.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort(
+        (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+      );
+    return specializations;
+  }
+
   List<DoctorModel> get _filteredDoctors {
     final query = searchController.text.trim().toLowerCase();
 
@@ -122,6 +134,10 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
       doctors,
     ) {
       AppState.doctors = doctors;
+      if (selectedCategory != null &&
+          !_availableSpecializations.contains(selectedCategory)) {
+        selectedCategory = null;
+      }
       if (mounted) {
         setState(() {});
       }
@@ -173,22 +189,34 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   }
 
   bool _matchesCategory(String specialization, String category) {
-    final normalizedSpecialization = specialization.toLowerCase();
+    return specialization.trim().toLowerCase() == category.trim().toLowerCase();
+  }
 
-    switch (category) {
-      case "Cardiology":
-        return normalizedSpecialization.contains("cardio");
-      case "Neurology":
-        return normalizedSpecialization.contains("neuro");
-      case "General":
-        return normalizedSpecialization.contains("general");
-      case "Pediatrics":
-        return normalizedSpecialization.contains("pediatric");
-      case "Dermatology":
-        return normalizedSpecialization.contains("derma");
-      default:
-        return normalizedSpecialization.contains(category.toLowerCase());
+  IconData _iconForSpecialization(String specialization) {
+    final normalized = specialization.toLowerCase();
+
+    if (normalized.contains('card')) return Icons.favorite_outline_rounded;
+    if (normalized.contains('neuro') || normalized.contains('psych')) {
+      return Icons.psychology_outlined;
     }
+    if (normalized.contains('child') || normalized.contains('pedia')) {
+      return Icons.child_care_outlined;
+    }
+    if (normalized.contains('skin') || normalized.contains('derma')) {
+      return Icons.healing_outlined;
+    }
+    if (normalized.contains('dental') || normalized.contains('dent')) {
+      return Icons.medication_outlined;
+    }
+    if (normalized.contains('eye') || normalized.contains('ophthal')) {
+      return Icons.visibility_outlined;
+    }
+    if (normalized.contains('ent')) return Icons.hearing_outlined;
+    if (normalized.contains('ortho') || normalized.contains('bone')) {
+      return Icons.accessibility_new_outlined;
+    }
+
+    return Icons.medical_services_outlined;
   }
 
   @override
@@ -217,42 +245,18 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                 height: 112,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
-                  children: [
-                    ServiceCard(
-                      icon: Icons.favorite_outline_rounded,
-                      title: "Cardiology",
-                      selected: selectedCategory == "Cardiology",
-                      onTap: () =>
-                          setState(() => selectedCategory = "Cardiology"),
-                    ),
-                    ServiceCard(
-                      icon: Icons.psychology_outlined,
-                      title: "Neurology",
-                      selected: selectedCategory == "Neurology",
-                      onTap: () =>
-                          setState(() => selectedCategory = "Neurology"),
-                    ),
-                    ServiceCard(
-                      icon: Icons.medical_services_outlined,
-                      title: "General",
-                      selected: selectedCategory == "General",
-                      onTap: () => setState(() => selectedCategory = "General"),
-                    ),
-                    ServiceCard(
-                      icon: Icons.child_care_outlined,
-                      title: "Pediatrics",
-                      selected: selectedCategory == "Pediatrics",
-                      onTap: () =>
-                          setState(() => selectedCategory = "Pediatrics"),
-                    ),
-                    ServiceCard(
-                      icon: Icons.healing_outlined,
-                      title: "Dermatology",
-                      selected: selectedCategory == "Dermatology",
-                      onTap: () =>
-                          setState(() => selectedCategory = "Dermatology"),
-                    ),
-                  ],
+                  children: _availableSpecializations
+                      .map(
+                        (specialization) => ServiceCard(
+                          icon: _iconForSpecialization(specialization),
+                          title: specialization,
+                          selected: selectedCategory == specialization,
+                          onTap: () => setState(
+                            () => selectedCategory = specialization,
+                          ),
+                        ),
+                      )
+                      .toList(),
                 ),
               ),
               const SizedBox(height: 28),
@@ -562,7 +566,7 @@ class ServiceCard extends StatelessWidget {
           ],
         ),
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.center,
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Container(
@@ -580,12 +584,20 @@ class ServiceCard extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 14),
-            Text(
-              title,
-              style: TextStyle(
-                color: selected ? Colors.white : AppColors.darkText,
-                fontSize: 14,
-                fontWeight: FontWeight.w700,
+            Expanded(
+              child: Center(
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: selected ? Colors.white : AppColors.darkText,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    height: 1.2,
+                  ),
+                ),
               ),
             ),
           ],

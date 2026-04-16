@@ -1,7 +1,15 @@
+import '../../models/admin_model.dart';
 import '../../models/doctor_model.dart';
 
 class DemoSeedData {
   DemoSeedData._();
+
+  static const AdminModel defaultAdmin = AdminModel(
+    username: 'admin',
+    password: 'admin',
+    name: 'GoDoc Admin',
+    email: 'admin@godoc.app',
+  );
 
   static final DateTime _today = DateTime.now();
 

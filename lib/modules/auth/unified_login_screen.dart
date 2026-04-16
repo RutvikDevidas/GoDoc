@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
+import '../../core/data/demo_seed_data.dart';
 import '../../core/firebase/firestore_data_service.dart';
-import '../../core/firebase/firebase_state.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
 import '../admin/admin_dashboard.dart';
@@ -44,7 +44,27 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
       return;
     }
 
-    if (user == "admin" && pass == "admin") {
+    try {
+      await FirestoreDataService.instance.saveAdmin(DemoSeedData.defaultAdmin);
+    } catch (_) {}
+
+    bool isAdmin = false;
+    try {
+      isAdmin =
+          await FirestoreDataService.instance.findAdminByCredentials(
+            username: user,
+            password: pass,
+          ) !=
+          null;
+    } catch (_) {
+      isAdmin = AppState.admins
+          .where((admin) => admin.username == user && admin.password == pass)
+          .isNotEmpty;
+    }
+
+    if (!mounted) return;
+
+    if (isAdmin) {
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const AdminDashboard()),
@@ -60,7 +80,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
           password: pass,
         );
       } catch (_) {
-        doctor = AppState.doctors.where((d) => d.username == user && d.password == pass).firstOrNull;
+        doctor = AppState.doctors
+            .where((d) => d.username == user && d.password == pass)
+            .firstOrNull;
       }
 
       if (!mounted) return;
@@ -92,7 +114,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => DoctorDashboard(doctor: syncedDoctor)),
+        MaterialPageRoute(
+          builder: (_) => DoctorDashboard(doctor: syncedDoctor),
+        ),
       );
       return;
     }
@@ -104,7 +128,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
         password: pass,
       );
     } catch (_) {
-      patient = AppState.patients.where((p) => p.username == user && p.password == pass).firstOrNull;
+      patient = AppState.patients
+          .where((p) => p.username == user && p.password == pass)
+          .firstOrNull;
     }
 
     if (!mounted) return;
@@ -129,7 +155,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => PatientHomeScreen(patient: syncedPatient)),
+      MaterialPageRoute(
+        builder: (_) => PatientHomeScreen(patient: syncedPatient),
+      ),
     );
   }
 

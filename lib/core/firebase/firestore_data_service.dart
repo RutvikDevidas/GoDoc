@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/app_state.dart';
 import '../data/demo_seed_data.dart';
 import 'firebase_state.dart';
+import '../../models/admin_model.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
@@ -17,6 +18,9 @@ class FirestoreDataService {
 
   CollectionReference<Map<String, dynamic>> get _doctors =>
       _godocRoot.collection('doctors');
+
+  CollectionReference<Map<String, dynamic>> get _admins =>
+      _godocRoot.collection('admins');
 
   CollectionReference<Map<String, dynamic>> get _patients =>
       _godocRoot.collection('patients');
@@ -40,6 +44,15 @@ class FirestoreDataService {
 
     final snapshot = await query.get();
     return snapshot.docs.map((doc) => DoctorModel.fromMap(doc.data())).toList();
+  }
+
+  Future<List<AdminModel>> getAdmins() async {
+    if (!firebaseAvailable) {
+      return List<AdminModel>.from(AppState.admins);
+    }
+
+    final snapshot = await _admins.get();
+    return snapshot.docs.map((doc) => AdminModel.fromMap(doc.data())).toList();
   }
 
   Future<List<PatientModel>> getPatients() async {
@@ -89,6 +102,18 @@ class FirestoreDataService {
     final snapshot = await _doctors.doc(username).get();
     if (!snapshot.exists || snapshot.data() == null) return null;
     return DoctorModel.fromMap(snapshot.data()!);
+  }
+
+  Future<AdminModel?> getAdminByUsername(String username) async {
+    if (!firebaseAvailable) {
+      return AppState.admins
+          .where((admin) => admin.username == username)
+          .firstOrNull;
+    }
+
+    final snapshot = await _admins.doc(username).get();
+    if (!snapshot.exists || snapshot.data() == null) return null;
+    return AdminModel.fromMap(snapshot.data()!);
   }
 
   Future<PatientModel?> getPatientByUsername(String username) async {
@@ -172,6 +197,11 @@ class FirestoreDataService {
     }
 
     await _ensureDocumentExists(
+      collection: _admins,
+      id: DemoSeedData.defaultAdmin.username,
+      data: DemoSeedData.defaultAdmin.toMap(),
+    );
+    await _ensureDocumentExists(
       collection: _doctors,
       id: DemoSeedData.demoDoctor.username,
       data: DemoSeedData.demoDoctor.toMap(),
@@ -203,10 +233,14 @@ class FirestoreDataService {
       return;
     }
 
+    final adminsSnapshot = await _admins.get();
     final doctorsSnapshot = await _doctors.get();
     final patientsSnapshot = await _patients.get();
     final appointmentsSnapshot = await _appointments.get();
 
+    AppState.admins = adminsSnapshot.docs
+        .map((doc) => AdminModel.fromMap(doc.data()))
+        .toList();
     AppState.doctors = doctorsSnapshot.docs
         .map((doc) => DoctorModel.fromMap(doc.data()))
         .toList();
@@ -239,6 +273,29 @@ class FirestoreDataService {
 
     if (snapshot.docs.isEmpty) return null;
     return DoctorModel.fromMap(snapshot.docs.first.data());
+  }
+
+  Future<AdminModel?> findAdminByCredentials({
+    required String username,
+    required String password,
+  }) async {
+    if (!firebaseAvailable) {
+      return AppState.admins
+          .where(
+            (admin) =>
+                admin.username == username && admin.password == password,
+          )
+          .firstOrNull;
+    }
+
+    final snapshot = await _admins
+        .where('username', isEqualTo: username)
+        .where('password', isEqualTo: password)
+        .limit(1)
+        .get();
+
+    if (snapshot.docs.isEmpty) return null;
+    return AdminModel.fromMap(snapshot.docs.first.data());
   }
 
   Future<PatientModel?> findPatientByCredentials({
@@ -291,6 +348,12 @@ class FirestoreDataService {
     });
     if (patientExistsLocally) return true;
 
+    final adminExistsLocally = AppState.admins.any((admin) {
+      final adminUsername = _normalizedUsername(admin.username);
+      return adminUsername == normalized;
+    });
+    if (adminExistsLocally) return true;
+
     if (!firebaseAvailable) return false;
 
     final doctorSnapshot = await _doctors
@@ -306,9 +369,16 @@ class FirestoreDataService {
         .where('username', isEqualTo: username.trim())
         .limit(1)
         .get();
-    return patientSnapshot.docs.any(
+    final patientTaken = patientSnapshot.docs.any(
       (doc) => _normalizedUsername(doc.id) != normalizedExcludedPatient,
     );
+    if (patientTaken) return true;
+
+    final adminSnapshot = await _admins
+        .where('username', isEqualTo: username.trim())
+        .limit(1)
+        .get();
+    return adminSnapshot.docs.isNotEmpty;
   }
 
   Future<String?> duplicateDoctorCredentialLabel({
@@ -364,6 +434,22 @@ class FirestoreDataService {
     }
 
     return null;
+  }
+
+  Future<void> saveAdmin(AdminModel admin) async {
+    if (!firebaseAvailable) {
+      final index = AppState.admins.indexWhere(
+        (existingAdmin) => existingAdmin.username == admin.username,
+      );
+      if (index >= 0) {
+        AppState.admins[index] = admin;
+      } else {
+        AppState.admins.add(admin);
+      }
+      return;
+    }
+
+    await _admins.doc(admin.username).set(admin.toMap());
   }
 
   Future<void> saveDoctor(DoctorModel doctor) async {

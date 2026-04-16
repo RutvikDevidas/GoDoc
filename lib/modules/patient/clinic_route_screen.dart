@@ -1,9 +1,16 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
+import 'package:http/http.dart' as http;
+import 'package:latlong2/latlong.dart' as latlng;
+
+import '../../core/constants/app_colors.dart';
 
 class ClinicRouteScreen extends StatefulWidget {
   final double clinicLatitude;
@@ -24,12 +31,21 @@ class ClinicRouteScreen extends StatefulWidget {
 }
 
 class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
-  final Completer<GoogleMapController> _controller = Completer();
+  final Completer<gmaps.GoogleMapController> _googleMapController =
+      Completer();
+  final MapController _webMapController = MapController();
+  StreamSubscription<Position>? _positionStreamSubscription;
   Position? _userPosition;
+  List<gmaps.LatLng> _routePoints = const [];
+  String? _currentLocationAddress;
   String? _error;
   bool _loading = true;
+  bool _routeLoading = false;
+  bool _usingFallbackRoute = false;
   bool _locationPermissionGranted = false;
   bool _permissionPermanentlyDenied = false;
+  double? _routeDistanceMeters;
+  double? _routeDurationSeconds;
 
   bool _hasLocationPermission(LocationPermission permission) {
     return permission == LocationPermission.always ||
@@ -40,6 +56,12 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   void initState() {
     super.initState();
     _loadUserLocation();
+  }
+
+  @override
+  void dispose() {
+    _positionStreamSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadUserLocation() async {
@@ -55,7 +77,10 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
         _userPosition = position;
         _locationPermissionGranted = true;
       });
+      await _loadCurrentLocationAddress(position);
+      await _loadBestRoute();
       await _moveCameraToBounds();
+      _startLocationTracking();
     } catch (e) {
       setState(() {
         _error = e.toString();
@@ -114,38 +139,240 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     }
   }
 
+  void _startLocationTracking() {
+    _positionStreamSubscription?.cancel();
+
+    final locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 20,
+    );
+
+    _positionStreamSubscription = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    ).listen((position) async {
+      final currentUserPosition = _userPosition;
+      final hasMeaningfulChange =
+          currentUserPosition == null ||
+          Geolocator.distanceBetween(
+                currentUserPosition.latitude,
+                currentUserPosition.longitude,
+                position.latitude,
+                position.longitude,
+              ) >
+              20;
+
+      if (!hasMeaningfulChange || !mounted) {
+        return;
+      }
+
+      setState(() {
+        _userPosition = position;
+      });
+
+      await _loadCurrentLocationAddress(position);
+      await _loadBestRoute();
+      await _moveCameraToBounds();
+    });
+  }
+
+  Future<void> _loadCurrentLocationAddress(Position position) async {
+    final fallback =
+        '${position.latitude.toStringAsFixed(5)}, ${position.longitude.toStringAsFixed(5)}';
+
+    try {
+      final placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+      final placemark = placemarks.isNotEmpty ? placemarks.first : null;
+      final address = _placemarkToAddress(placemark);
+
+      if (!mounted) return;
+      setState(() {
+        _currentLocationAddress = address.isEmpty ? fallback : address;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _currentLocationAddress = fallback;
+      });
+    }
+  }
+
+  String _placemarkToAddress(Placemark? placemark) {
+    if (placemark == null) {
+      return '';
+    }
+
+    final parts = <String?>[
+      placemark.name,
+      placemark.street,
+      placemark.subLocality,
+      placemark.locality,
+      placemark.administrativeArea,
+      placemark.postalCode,
+      placemark.country,
+    ];
+
+    final deduped = <String>[];
+    for (final part in parts) {
+      final trimmed = part?.trim() ?? '';
+      if (trimmed.isEmpty) continue;
+      if (deduped.contains(trimmed)) continue;
+      deduped.add(trimmed);
+    }
+
+    return deduped.join(', ');
+  }
+
+  Future<void> _loadBestRoute() async {
+    final userPosition = _userPosition;
+    if (userPosition == null) return;
+
+    final originLat = userPosition.latitude;
+    final originLon = userPosition.longitude;
+    final destinationLat = widget.clinicLatitude;
+    final destinationLon = widget.clinicLongitude;
+
+    final uri = Uri.parse(
+      'https://router.project-osrm.org/route/v1/driving/'
+      '$originLon,$originLat;$destinationLon,$destinationLat'
+      '?overview=full&geometries=geojson&alternatives=true&steps=false',
+    );
+
+    if (mounted) {
+      setState(() {
+        _routeLoading = true;
+      });
+    }
+
+    try {
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        throw Exception('Route service returned ${response.statusCode}.');
+      }
+
+      final payload = jsonDecode(response.body) as Map<String, dynamic>;
+      final routes = payload['routes'] as List<dynamic>? ?? const [];
+      if (routes.isEmpty) {
+        throw Exception('No road route found.');
+      }
+
+      final bestRoute = routes.first as Map<String, dynamic>;
+      final geometry = bestRoute['geometry'] as Map<String, dynamic>? ?? const {};
+      final coordinates = geometry['coordinates'] as List<dynamic>? ?? const [];
+
+      final points = coordinates
+          .whereType<List<dynamic>>()
+          .where((point) => point.length >= 2)
+          .map(
+            (point) => gmaps.LatLng(
+              (point[1] as num).toDouble(),
+              (point[0] as num).toDouble(),
+            ),
+          )
+          .toList(growable: false);
+
+      if (!mounted) return;
+      setState(() {
+        _routePoints = points.isEmpty
+            ? [
+                gmaps.LatLng(originLat, originLon),
+                gmaps.LatLng(destinationLat, destinationLon),
+              ]
+            : points;
+        _routeDistanceMeters = (bestRoute['distance'] as num?)?.toDouble();
+        _routeDurationSeconds = (bestRoute['duration'] as num?)?.toDouble();
+        _usingFallbackRoute = points.isEmpty;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _routePoints = [
+          gmaps.LatLng(originLat, originLon),
+          gmaps.LatLng(destinationLat, destinationLon),
+        ];
+        _routeDistanceMeters = _distanceMeters;
+        _routeDurationSeconds = null;
+        _usingFallbackRoute = true;
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _routeLoading = false;
+      });
+    }
+  }
+
   Future<void> _moveCameraToBounds() async {
     if (_userPosition == null) return;
 
-    final clinic = LatLng(widget.clinicLatitude, widget.clinicLongitude);
-    final user = LatLng(_userPosition!.latitude, _userPosition!.longitude);
+    final clinic = gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude);
+    final user = gmaps.LatLng(_userPosition!.latitude, _userPosition!.longitude);
     final latitudeDelta = (clinic.latitude - user.latitude).abs();
     final longitudeDelta = (clinic.longitude - user.longitude).abs();
 
-    final controller = await _controller.future;
-
     if (latitudeDelta < 0.0005 && longitudeDelta < 0.0005) {
-      await controller.animateCamera(
-        CameraUpdate.newLatLngZoom(clinic, 17),
-      );
+      if (kIsWeb) {
+        _webMapController.move(
+          latlng.LatLng(clinic.latitude, clinic.longitude),
+          17,
+        );
+      } else {
+        final controller = await _googleMapController.future;
+        await controller.animateCamera(
+          gmaps.CameraUpdate.newLatLngZoom(clinic, 17),
+        );
+      }
       return;
     }
 
-    final bounds = LatLngBounds(
-      southwest: LatLng(
+    final bounds = gmaps.LatLngBounds(
+      southwest: gmaps.LatLng(
         (clinic.latitude < user.latitude) ? clinic.latitude : user.latitude,
         (clinic.longitude < user.longitude) ? clinic.longitude : user.longitude,
       ),
-      northeast: LatLng(
+      northeast: gmaps.LatLng(
         (clinic.latitude > user.latitude) ? clinic.latitude : user.latitude,
         (clinic.longitude > user.longitude) ? clinic.longitude : user.longitude,
       ),
     );
 
     try {
-      await controller.animateCamera(CameraUpdate.newLatLngBounds(bounds, 64));
+      if (kIsWeb) {
+        _webMapController.fitCamera(
+          CameraFit.bounds(
+            bounds: LatLngBounds(
+              latlng.LatLng(
+                bounds.southwest.latitude,
+                bounds.southwest.longitude,
+              ),
+              latlng.LatLng(
+                bounds.northeast.latitude,
+                bounds.northeast.longitude,
+              ),
+            ),
+            padding: const EdgeInsets.all(48),
+          ),
+        );
+      } else {
+        final controller = await _googleMapController.future;
+        await controller.animateCamera(
+          gmaps.CameraUpdate.newLatLngBounds(bounds, 64),
+        );
+      }
     } catch (_) {
-      await controller.animateCamera(CameraUpdate.newLatLngZoom(clinic, 14));
+      if (kIsWeb) {
+        _webMapController.move(
+          latlng.LatLng(clinic.latitude, clinic.longitude),
+          14,
+        );
+      } else {
+        final controller = await _googleMapController.future;
+        await controller.animateCamera(
+          gmaps.CameraUpdate.newLatLngZoom(clinic, 14),
+        );
+      }
     }
   }
 
@@ -173,12 +400,12 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     );
   }
 
-  Set<Marker> get _markers {
-    final markers = <Marker>{
-      Marker(
-        markerId: const MarkerId('clinic'),
-        position: LatLng(widget.clinicLatitude, widget.clinicLongitude),
-        infoWindow: InfoWindow(
+  Set<gmaps.Marker> get _markers {
+    final markers = <gmaps.Marker>{
+      gmaps.Marker(
+        markerId: const gmaps.MarkerId('clinic'),
+        position: gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude),
+        infoWindow: gmaps.InfoWindow(
           title: widget.clinicName,
           snippet: widget.clinicAddress,
         ),
@@ -187,12 +414,15 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
 
     if (_userPosition != null) {
       markers.add(
-        Marker(
-          markerId: const MarkerId('you'),
-          position: LatLng(_userPosition!.latitude, _userPosition!.longitude),
-          infoWindow: const InfoWindow(title: 'You'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(
-            BitmapDescriptor.hueAzure,
+        gmaps.Marker(
+          markerId: const gmaps.MarkerId('you'),
+          position: gmaps.LatLng(
+            _userPosition!.latitude,
+            _userPosition!.longitude,
+          ),
+          infoWindow: const gmaps.InfoWindow(title: 'You'),
+          icon: gmaps.BitmapDescriptor.defaultMarkerWithHue(
+            gmaps.BitmapDescriptor.hueAzure,
           ),
         ),
       );
@@ -201,25 +431,230 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     return markers;
   }
 
-  Set<Polyline> get _polylines {
-    if (_userPosition == null) return const {};
+  Set<gmaps.Polyline> get _polylines {
+    if (_userPosition == null) return const <gmaps.Polyline>{};
 
     return {
-      Polyline(
-        polylineId: const PolylineId('route'),
-        points: [
-          LatLng(_userPosition!.latitude, _userPosition!.longitude),
-          LatLng(widget.clinicLatitude, widget.clinicLongitude),
-        ],
+      gmaps.Polyline(
+        polylineId: const gmaps.PolylineId('route'),
+        points: _routePoints.isEmpty
+            ? [
+                gmaps.LatLng(_userPosition!.latitude, _userPosition!.longitude),
+                gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude),
+              ]
+            : _routePoints,
         color: Theme.of(context).colorScheme.primary,
         width: 7,
-        geodesic: true,
-        startCap: Cap.roundCap,
-        endCap: Cap.roundCap,
+        geodesic: false,
+        startCap: gmaps.Cap.roundCap,
+        endCap: gmaps.Cap.roundCap,
         visible: true,
         zIndex: 1,
       ),
     };
+  }
+
+  String get _distanceLabel {
+    final distanceMeters = _routeDistanceMeters ?? _distanceMeters;
+    if (distanceMeters < 1000) {
+      return '${distanceMeters.toStringAsFixed(0)} m';
+    }
+    return '${(distanceMeters / 1000).toStringAsFixed(2)} km';
+  }
+
+  String? get _durationLabel {
+    final durationSeconds = _routeDurationSeconds;
+    if (durationSeconds == null) return null;
+
+    final totalMinutes = (durationSeconds / 60).round();
+    if (totalMinutes < 60) {
+      return '$totalMinutes min';
+    }
+
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+    if (minutes == 0) {
+      return '$hours hr';
+    }
+    return '$hours hr $minutes min';
+  }
+
+  String get _currentLocationLabel {
+    return _currentLocationAddress ?? 'Detecting your current location...';
+  }
+
+  Future<void> _recenterMap() async {
+    await _moveCameraToBounds();
+  }
+
+  Widget _buildFloatingActions() {
+    return Positioned(
+      right: 16,
+      bottom: 16,
+      child: FloatingActionButton.small(
+        heroTag: 'recenter-route',
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.primary,
+        onPressed: _recenterMap,
+        child: const Icon(Icons.my_location_rounded),
+      ),
+    );
+  }
+
+  Widget _buildRouteStatusCard() {
+    final theme = Theme.of(context);
+
+    return Positioned(
+      left: 16,
+      right: 16,
+      top: 16,
+      child: Material(
+        color: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withOpacity(0.96),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x14000000),
+                blurRadius: 18,
+                offset: Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  _InfoChip(
+                    icon: Icons.route_rounded,
+                    label: _routeLoading
+                        ? 'Refreshing route'
+                        : _usingFallbackRoute
+                            ? 'Approx route'
+                            : 'OSRM route',
+                    color: _usingFallbackRoute
+                        ? AppColors.warning
+                        : AppColors.primary,
+                  ),
+                  if (_userPosition != null)
+                    _InfoChip(
+                      icon: Icons.near_me_rounded,
+                      label: _durationLabel == null
+                          ? _distanceLabel
+                          : '$_distanceLabel / $_durationLabel',
+                      color: theme.colorScheme.primary,
+                    ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                _usingFallbackRoute
+                    ? 'Using a direct fallback line until the road route is available.'
+                    : 'Route starts from the patient’s current live location.',
+                style: const TextStyle(
+                  color: AppColors.mutedText,
+                  fontSize: 13,
+                  height: 1.4,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMap() {
+    if (kIsWeb) {
+      return FlutterMap(
+        mapController: _webMapController,
+        options: MapOptions(
+          initialCenter: latlng.LatLng(
+            widget.clinicLatitude,
+            widget.clinicLongitude,
+          ),
+          initialZoom: 14,
+        ),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.godoc',
+          ),
+          if (_routePoints.isNotEmpty)
+            PolylineLayer(
+              polylines: [
+                Polyline(
+                  points: _routePoints
+                      .map(
+                        (point) => latlng.LatLng(
+                          point.latitude,
+                          point.longitude,
+                        ),
+                      )
+                      .toList(growable: false),
+                  strokeWidth: 5,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+              ],
+            ),
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: latlng.LatLng(
+                  widget.clinicLatitude,
+                  widget.clinicLongitude,
+                ),
+                width: 52,
+                height: 52,
+                child: const Icon(
+                  Icons.local_hospital_rounded,
+                  size: 36,
+                  color: Colors.red,
+                ),
+              ),
+              if (_userPosition != null)
+                Marker(
+                  point: latlng.LatLng(
+                    _userPosition!.latitude,
+                    _userPosition!.longitude,
+                  ),
+                  width: 48,
+                  height: 48,
+                  child: const Icon(
+                    Icons.my_location_rounded,
+                    size: 28,
+                    color: Colors.blue,
+                  ),
+                ),
+            ],
+          ),
+        ],
+      );
+    }
+
+    return gmaps.GoogleMap(
+      initialCameraPosition: gmaps.CameraPosition(
+        target: gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude),
+        zoom: 14,
+      ),
+      mapType: gmaps.MapType.normal,
+      markers: _markers,
+      polylines: _polylines,
+      myLocationEnabled: _locationPermissionGranted,
+      myLocationButtonEnabled: _locationPermissionGranted,
+      onMapCreated: (controller) {
+        if (!_googleMapController.isCompleted) {
+          _googleMapController.complete(controller);
+        }
+      },
+    );
   }
 
   @override
@@ -238,23 +673,10 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       body: Stack(
         children: [
           Positioned.fill(
-            child: GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: LatLng(widget.clinicLatitude, widget.clinicLongitude),
-                zoom: 14,
-              ),
-              mapType: MapType.normal,
-              markers: _markers,
-              polylines: _polylines,
-              myLocationEnabled: _locationPermissionGranted,
-              myLocationButtonEnabled: _locationPermissionGranted,
-              onMapCreated: (controller) {
-                if (!_controller.isCompleted) {
-                  _controller.complete(controller);
-                }
-              },
-            ),
+            child: _buildMap(),
           ),
+          _buildRouteStatusCard(),
+          _buildFloatingActions(),
           if (_loading)
             const Positioned.fill(
               child: ColoredBox(
@@ -322,23 +744,137 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Clinic: ${widget.clinicName}',
-              style: const TextStyle(fontWeight: FontWeight.w700),
+              widget.clinicName,
+              style: const TextStyle(
+                fontWeight: FontWeight.w800,
+                color: AppColors.darkText,
+              ),
             ),
             const SizedBox(height: 4),
             Text(
               widget.clinicAddress,
-              style: const TextStyle(color: Colors.black54),
+              style: const TextStyle(color: AppColors.mutedText, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.trip_origin_rounded,
+                  size: 16,
+                  color: AppColors.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'From',
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _currentLocationLabel,
+                        style: const TextStyle(
+                          color: AppColors.darkText,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(
+                  Icons.location_on_rounded,
+                  size: 18,
+                  color: AppColors.danger,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'To',
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        widget.clinicAddress,
+                        style: const TextStyle(
+                          color: AppColors.darkText,
+                          fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(height: 10),
             Text(
               _userPosition == null
                   ? 'Tap refresh to find your location'
-                  : 'Distance: ${(_distanceMeters / 1000).toStringAsFixed(2)} km',
+                  : _durationLabel == null
+                      ? 'Distance: $_distanceLabel'
+                      : 'Best route: $_distanceLabel / $_durationLabel',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _InfoChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  const _InfoChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

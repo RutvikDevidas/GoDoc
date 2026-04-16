@@ -1,9 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../core/constants/app_colors.dart';
-import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
-import '../../core/firebase/firebase_state.dart';
 import '../../models/doctor_model.dart';
 import '../shared/clinic_location_picker_screen.dart';
 import 'doctor_success_screen.dart';
@@ -17,6 +15,7 @@ class DoctorRegistrationScreen extends StatefulWidget {
 }
 
 class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
+  static const String _customSpecializationOption = "Other";
   static const List<String> _specializations = [
     "Cardiologist",
     "Neurologist",
@@ -135,7 +134,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   }
 
   bool _validateSpecialization() {
-    if (selectedSpecialization != null && selectedSpecialization!.isNotEmpty) {
+    if (specialization.text.trim().isNotEmpty) {
       return true;
     }
 
@@ -183,9 +182,9 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   bool _validateClinicLocation() {
@@ -219,9 +218,9 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     if (!_validateStep(2)) return;
 
     // Prevent duplicate usernames before writing the doctor document.
-    final usernameTaken = await FirestoreDataService.instance.usernameExists(
-      username.text.trim(),
-    ).timeout(const Duration(seconds: 8));
+    final usernameTaken = await FirestoreDataService.instance
+        .usernameExists(username.text.trim())
+        .timeout(const Duration(seconds: 8));
     if (usernameTaken) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -231,12 +230,13 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
       return;
     }
 
-    final duplicateCredential =
-        await FirestoreDataService.instance.duplicateDoctorCredentialLabel(
+    final duplicateCredential = await FirestoreDataService.instance
+        .duplicateDoctorCredentialLabel(
           prNumber: prNumber.text.trim(),
           nmcNumber: nmcNumber.text.trim(),
           licenceNumber: licenceNumber.text.trim(),
-        ).timeout(const Duration(seconds: 8));
+        )
+        .timeout(const Duration(seconds: 8));
     if (duplicateCredential != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -317,9 +317,9 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         );
       }
       try {
-        await FirestoreDataService.instance
-            .syncAllToAppState()
-            .timeout(const Duration(seconds: 8));
+        await FirestoreDataService.instance.syncAllToAppState().timeout(
+          const Duration(seconds: 8),
+        );
       } catch (_) {}
     } catch (error) {
       if (mounted) {
@@ -585,21 +585,33 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   Widget _buildSpecializationDropdown() {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: DropdownButtonFormField<String>(
-        initialValue: selectedSpecialization,
-        items: _specializations
-            .map(
-              (item) =>
-                  DropdownMenuItem<String>(value: item, child: Text(item)),
-            )
-            .toList(),
-        onChanged: (value) {
-          setState(() {
-            selectedSpecialization = value;
-            specialization.text = value ?? "";
-          });
-        },
-        decoration: const InputDecoration(labelText: "Specialization"),
+      child: Column(
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: selectedSpecialization,
+            items: [..._specializations, _customSpecializationOption]
+                .map(
+                  (item) =>
+                      DropdownMenuItem<String>(value: item, child: Text(item)),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                selectedSpecialization = value;
+                if (value != _customSpecializationOption) {
+                  specialization.text = value ?? "";
+                } else {
+                  specialization.clear();
+                }
+              });
+            },
+            decoration: const InputDecoration(labelText: "Specialization"),
+          ),
+          if (selectedSpecialization == _customSpecializationOption) ...[
+            const SizedBox(height: 16),
+            _buildField(specialization, "Enter specialization"),
+          ],
+        ],
       ),
     );
   }

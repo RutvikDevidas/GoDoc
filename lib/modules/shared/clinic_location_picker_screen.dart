@@ -1,21 +1,19 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:http/http.dart' as http;
-import 'package:url_launcher/url_launcher.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
+import 'package:latlong2/latlong.dart' as latlng;
 
-/// Result returned when a clinic location is picked on the map.
 class ClinicLocationResult {
   final double latitude;
   final double longitude;
   final String address;
 
-  ClinicLocationResult({
+  const ClinicLocationResult({
     required this.latitude,
     required this.longitude,
     required this.address,
@@ -23,7 +21,6 @@ class ClinicLocationResult {
 }
 
 class ClinicLocationPickerScreen extends StatefulWidget {
-  /// Optional starting location.
   final double? initialLatitude;
   final double? initialLongitude;
   final String? initialAddress;
@@ -42,110 +39,137 @@ class ClinicLocationPickerScreen extends StatefulWidget {
 
 class _ClinicLocationPickerScreenState
     extends State<ClinicLocationPickerScreen> {
-  final Completer<GoogleMapController> _controller = Completer();
-  final TextEditingController _latitudeController = TextEditingController();
-  final TextEditingController _longitudeController = TextEditingController();
+  static const gmaps.LatLng _defaultCenter = gmaps.LatLng(28.6139, 77.2090);
 
-  LatLng? _pickedLocation;
-  String? _pickedAddress;
-  bool _loading = true;
-  String? _error;
-  bool _locationPermissionGranted = false;
-  bool _permissionPermanentlyDenied = false;
+  final Completer<gmaps.GoogleMapController> _googleMapController =
+      Completer();
+  final MapController _webMapController = MapController();
+
+  gmaps.LatLng? _selectedLocation;
+  String? _selectedAddress;
+  bool _saving = false;
+  bool _loadingCurrentLocation = false;
 
   @override
   void initState() {
     super.initState();
-    _pickedAddress = widget.initialAddress;
     if (widget.initialLatitude != null && widget.initialLongitude != null) {
-      _pickedLocation = LatLng(
+      _selectedLocation = gmaps.LatLng(
         widget.initialLatitude!,
         widget.initialLongitude!,
       );
-      _latitudeController.text = widget.initialLatitude!.toString();
-      _longitudeController.text = widget.initialLongitude!.toString();
     }
-    if (_supportsEmbeddedMap) {
-      _initMap();
-    } else {
-      _loading = false;
-      if (kIsWeb &&
-          widget.initialLatitude == null &&
-          widget.initialLongitude == null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) {
-            if ((widget.initialAddress ?? '').trim().isNotEmpty) {
-              _searchFromAddress();
-            } else {
-              _useCurrentLocation();
-            }
-          }
-        });
-      }
-    }
+    _selectedAddress = widget.initialAddress?.trim();
   }
 
-  @override
-  void dispose() {
-    _latitudeController.dispose();
-    _longitudeController.dispose();
-    super.dispose();
-  }
+  gmaps.LatLng get _initialCameraTarget => _selectedLocation ?? _defaultCenter;
 
-  Future<void> _initMap() async {
+  Future<void> _setSelectedLocation(gmaps.LatLng location) async {
+    setState(() {
+      _selectedLocation = location;
+      _saving = true;
+    });
+
+    final fallbackAddress = _formatCoordinates(
+      location.latitude,
+      location.longitude,
+    );
+
     try {
-      final cameraPosition = await _getInitialCameraPosition();
-      final controller = await _controller.future.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () {
-          throw Exception(
-            'Google Maps did not initialize. Check your Maps API key and platform support.',
-          );
-        },
+      final placemarks = await placemarkFromCoordinates(
+        location.latitude,
+        location.longitude,
       );
-      controller.moveCamera(CameraUpdate.newCameraPosition(cameraPosition));
+      final placemark = placemarks.isNotEmpty ? placemarks.first : null;
+      final address = _placemarkToAddress(placemark);
+
+      if (!mounted) return;
       setState(() {
-        _loading = false;
+        _selectedAddress = address.isEmpty ? fallbackAddress : address;
       });
-    } catch (e) {
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
-        _loading = false;
-        _error = e.toString();
+        _selectedAddress = fallbackAddress;
+      });
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
       });
     }
   }
 
-  Future<CameraPosition> _getInitialCameraPosition() async {
-    if (_pickedLocation != null) {
-      return CameraPosition(target: _pickedLocation!, zoom: 15);
+  String _placemarkToAddress(Placemark? placemark) {
+    if (placemark == null) {
+      return '';
     }
+
+    final parts = <String?>[
+      placemark.name,
+      placemark.street,
+      placemark.subLocality,
+      placemark.locality,
+      placemark.administrativeArea,
+      placemark.postalCode,
+      placemark.country,
+    ];
+
+    final deduped = <String>[];
+    for (final part in parts) {
+      final trimmed = part?.trim() ?? '';
+      if (trimmed.isEmpty) continue;
+      if (deduped.contains(trimmed)) continue;
+      deduped.add(trimmed);
+    }
+
+    return deduped.join(', ');
+  }
+
+  String _formatCoordinates(double latitude, double longitude) {
+    return '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}';
+  }
+
+  Future<void> _useCurrentLocation() async {
+    setState(() {
+      _loadingCurrentLocation = true;
+    });
 
     try {
       final position = await _determinePosition();
-      return CameraPosition(
-        target: LatLng(position.latitude, position.longitude),
-        zoom: 15,
-      );
-    } catch (_) {
-      return const CameraPosition(
-        target: LatLng(20.5937, 78.9629),
-        zoom: 4.8,
-      );
-    }
-  }
+      final location = gmaps.LatLng(position.latitude, position.longitude);
 
-  bool _hasLocationPermission(LocationPermission permission) {
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
+      await _setSelectedLocation(location);
+
+      if (kIsWeb) {
+        _webMapController.move(
+          latlng.LatLng(location.latitude, location.longitude),
+          16,
+        );
+      } else {
+        final controller = await _googleMapController.future;
+        await controller.animateCamera(
+          gmaps.CameraUpdate.newLatLngZoom(location, 16),
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString())),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _loadingCurrentLocation = false;
+      });
+    }
   }
 
   Future<Position> _determinePosition() async {
     if (kIsWeb) {
-      final position = await Geolocator.getCurrentPosition(
+      return Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
-      );
-      _locationPermissionGranted = true;
-      return position;
+      ).timeout(const Duration(seconds: 12));
     }
 
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -157,460 +181,218 @@ class _ClinicLocationPickerScreenState
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        _locationPermissionGranted = false;
-        throw Exception('Location permissions are denied');
+        throw Exception('Location permission was denied.');
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
-      _permissionPermanentlyDenied = true;
-      _locationPermissionGranted = false;
       throw Exception(
-        'Location permissions are permanently denied, we cannot request permissions.',
+        'Location permission is permanently denied. Open device settings and try again.',
       );
     }
 
-    _permissionPermanentlyDenied = false;
-    _locationPermissionGranted = _hasLocationPermission(permission);
-
-    try {
-      return await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(const Duration(seconds: 12));
-    } catch (_) {
-      final lastKnown = await Geolocator.getLastKnownPosition();
-      if (lastKnown != null) {
-        return lastKnown;
-      }
-      rethrow;
-    }
-  }
-
-  Future<void> _reverseGeocode(LatLng latLng) async {
-    try {
-      final placemarks = await placemarkFromCoordinates(
-        latLng.latitude,
-        latLng.longitude,
-      );
-      if (placemarks.isNotEmpty) {
-        final place = placemarks.first;
-        final parts = <String>[];
-        if (place.name != null && place.name!.isNotEmpty) {
-          parts.add(place.name!);
-        }
-        if (place.locality != null && place.locality!.isNotEmpty) {
-          parts.add(place.locality!);
-        }
-        if (place.administrativeArea != null &&
-            place.administrativeArea!.isNotEmpty) {
-          parts.add(place.administrativeArea!);
-        }
-        if (place.country != null && place.country!.isNotEmpty) {
-          parts.add(place.country!);
-        }
-
-        setState(() {
-          _pickedAddress = parts.join(', ');
-        });
-      }
-    } catch (_) {
-      // ignore errors - address is optional
-    }
-  }
-
-  void _onMapTap(LatLng position) async {
-    setState(() {
-      _pickedLocation = position;
-      _pickedAddress = null;
-      _latitudeController.text = position.latitude.toString();
-      _longitudeController.text = position.longitude.toString();
-    });
-
-    await _reverseGeocode(position);
-
-    final controller = await _controller.future;
-    controller.animateCamera(CameraUpdate.newLatLng(position));
+    return Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    ).timeout(const Duration(seconds: 12));
   }
 
   void _confirmSelection() {
-    if (!_supportsEmbeddedMap) {
-      final latitude = double.tryParse(_latitudeController.text.trim());
-      final longitude = double.tryParse(_longitudeController.text.trim());
-
-      if (latitude == null || longitude == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Enter valid latitude and longitude values.'),
-          ),
-        );
-        return;
-      }
-
-      _pickedLocation = LatLng(latitude, longitude);
-    }
-
-    if (_pickedLocation == null) {
+    final selectedLocation = _selectedLocation;
+    final trimmedAddress = _selectedAddress?.trim();
+    if (selectedLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a location on the map.')),
+        const SnackBar(content: Text('Tap the map to choose a clinic location.')),
       );
       return;
     }
 
-    Navigator.of(context).pop(
+    Navigator.pop(
+      context,
       ClinicLocationResult(
-        latitude: _pickedLocation!.latitude,
-        longitude: _pickedLocation!.longitude,
+        latitude: selectedLocation.latitude,
+        longitude: selectedLocation.longitude,
         address:
-            _pickedAddress ??
-            '${_pickedLocation!.latitude.toStringAsFixed(6)}, ${_pickedLocation!.longitude.toStringAsFixed(6)}',
+            (trimmedAddress != null && trimmedAddress.isNotEmpty)
+                ? trimmedAddress
+                : _formatCoordinates(
+                    selectedLocation.latitude,
+                    selectedLocation.longitude,
+                  ),
+      ),
+    );
+  }
+
+  Widget _buildMap(gmaps.LatLng? selectedLocation) {
+    if (kIsWeb) {
+      return FlutterMap(
+        mapController: _webMapController,
+        options: MapOptions(
+          initialCenter: latlng.LatLng(
+            _initialCameraTarget.latitude,
+            _initialCameraTarget.longitude,
+          ),
+          initialZoom: selectedLocation == null ? 11 : 16,
+          onTap: (_, point) {
+            _setSelectedLocation(
+              gmaps.LatLng(point.latitude, point.longitude),
+            );
+          },
         ),
-    );
-  }
-
-  bool get _supportsEmbeddedMap {
-    if (kIsWeb) return true;
-
-    return switch (defaultTargetPlatform) {
-      TargetPlatform.android || TargetPlatform.iOS => true,
-      _ => false,
-    };
-  }
-
-  Future<void> _openInGoogleMaps() async {
-    final query = widget.initialAddress?.trim().isNotEmpty == true
-        ? widget.initialAddress!.trim()
-        : _pickedAddress?.trim();
-    final latitude = _latitudeController.text.trim();
-    final longitude = _longitudeController.text.trim();
-
-    Uri uri;
-    if (latitude.isNotEmpty && longitude.isNotEmpty) {
-      uri = Uri.parse(
-        'https://www.openstreetmap.org/?mlat=$latitude&mlon=$longitude#map=16/$latitude/$longitude',
-      );
-    } else if (query != null && query.isNotEmpty) {
-      uri = Uri.https('www.openstreetmap.org', '/search', {
-        'query': query,
-      });
-    } else {
-      uri = Uri.parse('https://www.openstreetmap.org');
-    }
-
-    final launched = await launchUrl(
-      uri,
-      mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication,
-    );
-    if (!launched && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Unable to open Google Maps.')),
-      );
-    }
-  }
-
-  Future<void> _searchFromAddress() async {
-    final address = (widget.initialAddress ?? '').trim();
-    if (address.isEmpty) {
-      setState(() {
-        _error = 'Enter a clinic address first, then reopen the picker.';
-      });
-      return;
-    }
-
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
-        'q': address,
-        'format': 'jsonv2',
-        'limit': '1',
-      });
-      final response = await http.get(
-        uri,
-        headers: {'Accept': 'application/json'},
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Address lookup failed with code ${response.statusCode}.');
-      }
-
-      final results = jsonDecode(response.body) as List<dynamic>;
-      if (results.isEmpty) {
-        throw Exception('No coordinates found for the clinic address.');
-      }
-
-      final first = results.first as Map<String, dynamic>;
-      final latitude = double.parse(first['lat'].toString());
-      final longitude = double.parse(first['lon'].toString());
-
-      _latitudeController.text = latitude.toString();
-      _longitudeController.text = longitude.toString();
-
-      setState(() {
-        _pickedLocation = LatLng(latitude, longitude);
-        _pickedAddress = first['display_name']?.toString() ?? address;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _useCurrentLocation() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-      _permissionPermanentlyDenied = false;
-    });
-
-    try {
-      final position = await _determinePosition();
-      final latLng = LatLng(position.latitude, position.longitude);
-
-      _latitudeController.text = latLng.latitude.toString();
-      _longitudeController.text = latLng.longitude.toString();
-
-      setState(() {
-        _pickedLocation = latLng;
-      });
-
-      await _reverseGeocode(latLng);
-
-      if (_supportsEmbeddedMap) {
-        final controller = await _controller.future;
-        await controller.animateCamera(CameraUpdate.newLatLngZoom(latLng, 15));
-      }
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-      });
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Unable to get current location. $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-        });
-      }
-    }
-  }
-
-  Widget _buildDesktopFallback() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 720),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Icon(Icons.map_outlined, size: 36),
-            const SizedBox(height: 16),
-            const Text(
-              'Pick clinic location',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              kIsWeb
-                  ? 'If the browser map cannot load, use your current location, search from the clinic address, or enter latitude and longitude manually.'
-                  : 'Use your current location, search from the clinic address, or enter latitude and longitude manually.',
-              style: const TextStyle(height: 1.5),
-            ),
-            if (_permissionPermanentlyDenied) ...[
-              const SizedBox(height: 8),
-              const Text(
-                'Location permission was denied permanently. Re-enable it in app settings to autofill coordinates.',
-                style: TextStyle(color: Colors.orange, height: 1.4),
-              ),
-            ],
-            const SizedBox(height: 20),
-            Wrap(
-              spacing: 12,
-              runSpacing: 12,
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _loading ? null : _useCurrentLocation,
-                  icon: const Icon(Icons.my_location_rounded),
-                  label: const Text('Use current location'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _loading ? null : _searchFromAddress,
-                  icon: const Icon(Icons.search_rounded),
-                  label: const Text('Use clinic address'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: _openInGoogleMaps,
-                  icon: const Icon(Icons.open_in_new_rounded),
-                  label: const Text('Open OpenStreetMap'),
+        children: [
+          TileLayer(
+            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+            userAgentPackageName: 'com.example.godoc',
+          ),
+          if (selectedLocation != null)
+            MarkerLayer(
+              markers: [
+                Marker(
+                  point: latlng.LatLng(
+                    selectedLocation.latitude,
+                    selectedLocation.longitude,
+                  ),
+                  width: 56,
+                  height: 56,
+                  child: const Icon(
+                    Icons.location_pin,
+                    size: 42,
+                    color: Colors.red,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: 20),
-            if (_loading)
-              const Padding(
-                padding: EdgeInsets.only(bottom: 16),
-                child: LinearProgressIndicator(),
-              ),
-            if (_error != null) ...[
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.redAccent, height: 1.4),
-              ),
-              const SizedBox(height: 12),
-            ],
-            TextField(
-              controller: _latitudeController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Latitude'),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _longitudeController,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(labelText: 'Longitude'),
-            ),
-            const SizedBox(height: 12),
-            if (_pickedAddress != null) ...[
-              Text(
-                _pickedAddress!,
-                style: const TextStyle(color: Colors.black54, height: 1.4),
-              ),
-              const SizedBox(height: 12),
-            ],
-            const Text(
-              'Tip: allow browser location permission on localhost when prompted.',
-              style: TextStyle(color: Colors.black54),
-            ),
-            const SizedBox(height: 20),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _confirmSelection,
-                child: const Text('Confirm location'),
-              ),
-            ),
-            const SizedBox(height: 12),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBottomActions() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.06),
-            blurRadius: 12,
-          ),
         ],
+      );
+    }
+
+    return gmaps.GoogleMap(
+      initialCameraPosition: gmaps.CameraPosition(
+        target: _initialCameraTarget,
+        zoom: selectedLocation == null ? 11 : 16,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            _pickedAddress ?? 'Tap on the map to pick your clinic location',
-            style: const TextStyle(fontSize: 14),
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  onPressed: _confirmSelection,
-                  child: const Text('Confirm location'),
+      myLocationButtonEnabled: false,
+      myLocationEnabled: true,
+      onTap: _setSelectedLocation,
+      onMapCreated: (controller) {
+        if (!_googleMapController.isCompleted) {
+          _googleMapController.complete(controller);
+        }
+      },
+      markers: selectedLocation == null
+          ? const <gmaps.Marker>{}
+          : <gmaps.Marker>{
+              gmaps.Marker(
+                markerId: const gmaps.MarkerId('clinic-location'),
+                position: selectedLocation,
+                infoWindow: gmaps.InfoWindow(
+                  title: 'Selected clinic',
+                  snippet:
+                      _selectedAddress ??
+                      _formatCoordinates(
+                        selectedLocation.latitude,
+                        selectedLocation.longitude,
+                      ),
                 ),
               ),
-              const SizedBox(width: 12),
-              OutlinedButton(
-                onPressed: () => Navigator.of(context).pop(),
-                child: const Text('Cancel'),
-              ),
-            ],
-          ),
-        ],
-      ),
+            },
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_supportsEmbeddedMap || _error != null) {
-      return Scaffold(
-        appBar: AppBar(title: const Text('Pick clinic location')),
-        body: SafeArea(child: _buildDesktopFallback()),
-      );
-    }
+    final selectedLocation = _selectedLocation;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Pick clinic location')),
+      appBar: AppBar(
+        title: const Text('Clinic location'),
+        actions: [
+          TextButton(
+            onPressed: _saving ? null : _confirmSelection,
+            child: const Text('Use this'),
+          ),
+        ],
+      ),
       body: Column(
         children: [
           Expanded(
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: GoogleMap(
-                    initialCameraPosition: const CameraPosition(
-                      target: LatLng(0, 0),
-                      zoom: 2,
-                    ),
-                    mapType: MapType.normal,
-                    myLocationEnabled: _locationPermissionGranted,
-                    myLocationButtonEnabled: _locationPermissionGranted,
-                    onMapCreated: (controller) {
-                      if (!_controller.isCompleted) {
-                        _controller.complete(controller);
-                      }
-                    },
-                    markers: _pickedLocation == null
-                        ? const {}
-                        : {
-                            Marker(
-                              markerId: const MarkerId('clinic'),
-                              position: _pickedLocation!,
+            child: _buildMap(selectedLocation),
+          ),
+          SafeArea(
+            top: false,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 20),
+              decoration: BoxDecoration(
+                color: Theme.of(context).scaffoldBackgroundColor,
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x14000000),
+                    blurRadius: 16,
+                    offset: Offset(0, -4),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Tap anywhere on the map to pin the clinic.',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    selectedLocation == null
+                        ? 'No location selected yet.'
+                        : _selectedAddress ??
+                            _formatCoordinates(
+                              selectedLocation.latitude,
+                              selectedLocation.longitude,
                             ),
-                          },
-                    onTap: _onMapTap,
                   ),
-                ),
-                if (_loading)
-                  const Positioned.fill(
-                    child: ColoredBox(
-                      color: Colors.black26,
-                      child: Center(child: CircularProgressIndicator()),
+                  if (selectedLocation != null) ...[
+                    const SizedBox(height: 6),
+                    Text(
+                      _formatCoordinates(
+                        selectedLocation.latitude,
+                        selectedLocation.longitude,
+                      ),
+                      style: const TextStyle(color: Colors.black54),
                     ),
+                  ],
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _loadingCurrentLocation || _saving
+                              ? null
+                              : _useCurrentLocation,
+                          icon: _loadingCurrentLocation
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.my_location_outlined),
+                          label: const Text('Current location'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton(
+                          onPressed: _saving ? null : _confirmSelection,
+                          child: Text(_saving ? 'Saving...' : 'Confirm'),
+                        ),
+                      ),
+                    ],
                   ),
-                if (_error != null)
-                  const SizedBox.shrink(),
-              ],
+                ],
+              ),
             ),
           ),
-          _buildBottomActions(),
         ],
       ),
     );
