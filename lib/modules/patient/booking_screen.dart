@@ -851,12 +851,6 @@ class _PaymentDetailsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final hasBankDetails =
-        doctor.bankAccountHolder.trim().isNotEmpty ||
-        doctor.bankName.trim().isNotEmpty ||
-        doctor.bankAccountNumber.trim().isNotEmpty ||
-        doctor.bankIfscCode.trim().isNotEmpty;
-
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -883,19 +877,7 @@ class _PaymentDetailsCard extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
-          if (doctor.upiId.trim().isNotEmpty && hasBankDetails)
-            const SizedBox(height: 10),
-          if (hasBankDetails) ...[
-            if (doctor.bankAccountHolder.trim().isNotEmpty)
-              Text("Account holder: ${doctor.bankAccountHolder}"),
-            if (doctor.bankName.trim().isNotEmpty)
-              Text("Bank: ${doctor.bankName}"),
-            if (doctor.bankAccountNumber.trim().isNotEmpty)
-              Text("Account number: ${doctor.bankAccountNumber}"),
-            if (doctor.bankIfscCode.trim().isNotEmpty)
-              Text("IFSC: ${doctor.bankIfscCode}"),
-            const SizedBox(height: 10),
-          ],
+          const SizedBox(height: 10),
           const Text(
             "Payment is compulsory for online consultations. The booking is created only after payment is marked successful.",
             style: TextStyle(

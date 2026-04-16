@@ -23,7 +23,6 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
   final ImagePicker _imagePicker = ImagePicker();
   final _phonePattern = RegExp(r'^[0-9]{7,15}$');
   final _upiPattern = RegExp(r'^[a-zA-Z0-9._-]{2,}@[a-zA-Z]{2,}$');
-  final _ifscPattern = RegExp(r'^[A-Z]{4}0[A-Z0-9]{6}$');
 
   late final TextEditingController name;
   late final TextEditingController username;
@@ -35,10 +34,6 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
   late final TextEditingController bio;
   late final TextEditingController upiId;
   late final TextEditingController consultationFee;
-  late final TextEditingController bankAccountHolder;
-  late final TextEditingController bankName;
-  late final TextEditingController bankAccountNumber;
-  late final TextEditingController bankIfscCode;
 
   double? _selectedLatitude;
   double? _selectedLongitude;
@@ -60,14 +55,6 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     consultationFee = TextEditingController(
       text: widget.doctor.consultationFee.toStringAsFixed(0),
     );
-    bankAccountHolder = TextEditingController(
-      text: widget.doctor.bankAccountHolder,
-    );
-    bankName = TextEditingController(text: widget.doctor.bankName);
-    bankAccountNumber = TextEditingController(
-      text: widget.doctor.bankAccountNumber,
-    );
-    bankIfscCode = TextEditingController(text: widget.doctor.bankIfscCode);
 
     _selectedLatitude = widget.doctor.clinicLatitude;
     _selectedLongitude = widget.doctor.clinicLongitude;
@@ -94,10 +81,6 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     bio.dispose();
     upiId.dispose();
     consultationFee.dispose();
-    bankAccountHolder.dispose();
-    bankName.dispose();
-    bankAccountNumber.dispose();
-    bankIfscCode.dispose();
     super.dispose();
   }
 
@@ -114,10 +97,10 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     widget.doctor.clinicLongitude = _selectedLongitude;
     widget.doctor.bio = bio.text.trim();
     widget.doctor.upiId = upiId.text.trim();
-    widget.doctor.bankAccountHolder = bankAccountHolder.text.trim();
-    widget.doctor.bankName = bankName.text.trim();
-    widget.doctor.bankAccountNumber = bankAccountNumber.text.trim();
-    widget.doctor.bankIfscCode = bankIfscCode.text.trim().toUpperCase();
+    widget.doctor.bankAccountHolder = '';
+    widget.doctor.bankName = '';
+    widget.doctor.bankAccountNumber = '';
+    widget.doctor.bankIfscCode = '';
     widget.doctor.consultationFee =
         double.tryParse(consultationFee.text.trim()) ??
         widget.doctor.consultationFee;
@@ -357,32 +340,24 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
               ),
               const SizedBox(height: 16),
               _FormSection(
-                title: "E-banking details",
+                title: "UPI details",
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text(
-                      "Add the payment details patients can use while booking an online consultation.",
+                      "Add only the UPI ID patients should use while booking an online consultation.",
                       style: TextStyle(
                         color: AppColors.mutedText,
                         height: 1.5,
                       ),
                     ),
                     const SizedBox(height: 16),
-                    _buildField(bankAccountHolder, "Account holder name"),
-                    _buildField(bankName, "Bank name"),
                     _buildField(
-                      bankAccountNumber,
-                      "Account number",
-                      keyboardType: TextInputType.number,
-                    ),
-                    _buildField(
-                      bankIfscCode,
-                      "IFSC code",
-                      extraValidator: (value) =>
-                          value.isEmpty || _ifscPattern.hasMatch(value.toUpperCase())
-                              ? null
-                              : "Enter a valid IFSC code",
+                      upiId,
+                      "UPI ID",
+                      extraValidator: (value) => _upiPattern.hasMatch(value)
+                          ? null
+                          : "Enter a valid UPI ID",
                     ),
                   ],
                 ),

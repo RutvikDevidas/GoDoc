@@ -268,7 +268,7 @@ class _ClinicLocationPickerScreenState
   }
 
   bool get _supportsEmbeddedMap {
-    if (kIsWeb) return false;
+    if (kIsWeb) return true;
 
     return switch (defaultTargetPlatform) {
       TargetPlatform.android || TargetPlatform.iOS => true,
@@ -422,9 +422,11 @@ class _ClinicLocationPickerScreenState
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
-            const Text(
-              'On web, use your current location, search from the clinic address, or enter latitude and longitude manually.',
-              style: TextStyle(height: 1.5),
+            Text(
+              kIsWeb
+                  ? 'If the browser map cannot load, use your current location, search from the clinic address, or enter latitude and longitude manually.'
+                  : 'Use your current location, search from the clinic address, or enter latitude and longitude manually.',
+              style: const TextStyle(height: 1.5),
             ),
             if (_permissionPermanentlyDenied) ...[
               const SizedBox(height: 8),
@@ -461,6 +463,13 @@ class _ClinicLocationPickerScreenState
                 padding: EdgeInsets.only(bottom: 16),
                 child: LinearProgressIndicator(),
               ),
+            if (_error != null) ...[
+              Text(
+                _error!,
+                style: const TextStyle(color: Colors.redAccent, height: 1.4),
+              ),
+              const SizedBox(height: 12),
+            ],
             TextField(
               controller: _latitudeController,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -473,13 +482,6 @@ class _ClinicLocationPickerScreenState
               decoration: const InputDecoration(labelText: 'Longitude'),
             ),
             const SizedBox(height: 12),
-            if (_error != null) ...[
-              Text(
-                _error!,
-                style: const TextStyle(color: Colors.redAccent),
-              ),
-              const SizedBox(height: 12),
-            ],
             if (_pickedAddress != null) ...[
               Text(
                 _pickedAddress!,
@@ -557,7 +559,7 @@ class _ClinicLocationPickerScreenState
 
   @override
   Widget build(BuildContext context) {
-    if (!_supportsEmbeddedMap) {
+    if (!_supportsEmbeddedMap || _error != null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Pick clinic location')),
         body: SafeArea(child: _buildDesktopFallback()),
@@ -577,6 +579,7 @@ class _ClinicLocationPickerScreenState
                       target: LatLng(0, 0),
                       zoom: 2,
                     ),
+                    mapType: MapType.normal,
                     myLocationEnabled: _locationPermissionGranted,
                     myLocationButtonEnabled: _locationPermissionGranted,
                     onMapCreated: (controller) {
@@ -603,44 +606,7 @@ class _ClinicLocationPickerScreenState
                     ),
                   ),
                 if (_error != null)
-                  Positioned.fill(
-                    child: Container(
-                      color: Colors.black54,
-                      child: Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(24.0),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Icon(
-                                Icons.error,
-                                color: Colors.white,
-                                size: 48,
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                _error!,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 16,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                              const SizedBox(height: 16),
-                              const Text(
-                                'Check the Maps API key in AndroidManifest.xml or Info.plist if the map stays blank.',
-                                style: TextStyle(
-                                  color: Colors.yellow,
-                                  fontSize: 12,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
+                  const SizedBox.shrink(),
               ],
             ),
           ),

@@ -272,7 +272,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
             "clinicLongitude": selectedLongitude,
             "bio":
                 "${name.text.trim()} is a trusted ${specialization.text.trim()} offering patient-focused care, clear guidance, and consistent follow-up through ${clinicName.text.trim()}.",
-            "upiId": "${username.text.trim()}@upi",
+            "upiId": "",
             "bankAccountHolder": "",
             "bankName": "",
             "bankAccountNumber": "",

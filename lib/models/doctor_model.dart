@@ -83,7 +83,7 @@ class DoctorModel {
     this.rejected = false,
   }) : clinicLocation = clinicLocation ?? clinicAddress,
        bio = bio ?? _defaultBio(name, specialization, clinicName),
-       upiId = upiId ?? "$username@upi",
+       upiId = upiId ?? '',
        bankAccountHolder = bankAccountHolder ?? '',
        bankName = bankName ?? '',
        bankAccountNumber = bankAccountNumber ?? '',

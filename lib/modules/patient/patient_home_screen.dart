@@ -133,7 +133,10 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         .watchAppointments(patientUsername: widget.patient.username)
         .listen((appointments) {
           // Keep AppState in sync for the rest of the UI.
-          AppState.appointments = appointments;
+          FirestoreDataService.instance.mergeAppointmentsIntoAppState(
+            appointments,
+            patientUsername: widget.patient.username,
+          );
 
           for (final appt in appointments) {
             final shouldNotify =

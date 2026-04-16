@@ -1,6 +1,7 @@
 // ignore_for_file: use_build_context_synchronously
 
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
@@ -22,6 +23,40 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   List<AppointmentModel> get myAppointments => AppState.appointments
       .where((a) => a.doctorUsername == widget.doctor.username)
       .toList();
+
+  DateTime? _parseAppointmentDate(String value) {
+    try {
+      return DateFormat('d MMMM yyyy').parseStrict(value.trim());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool _isSameCalendarDay(DateTime first, DateTime second) {
+    return first.year == second.year &&
+        first.month == second.month &&
+        first.day == second.day;
+  }
+
+  bool _removeCompletedSlotFromAvailability(AppointmentModel appt) {
+    final appointmentDate = _parseAppointmentDate(appt.date);
+    if (appointmentDate == null) return false;
+
+    final matchingDayIndex = widget.doctor.availability.indexWhere(
+      (availability) => _isSameCalendarDay(availability.date, appointmentDate),
+    );
+    if (matchingDayIndex < 0) return false;
+
+    final matchingDay = widget.doctor.availability[matchingDayIndex];
+    final removed = matchingDay.timeSlots.remove(appt.time);
+    if (!removed) return false;
+
+    if (matchingDay.timeSlots.isEmpty) {
+      widget.doctor.availability.removeAt(matchingDayIndex);
+    }
+
+    return true;
+  }
 
   Future<void> confirmAppointment(AppointmentModel appt) async {
     final requiresOnlinePayment = appt.type.toLowerCase() == "online";
@@ -106,6 +141,8 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
   }
 
   Future<void> completeAppointment(AppointmentModel appt) async {
+    final removedFromAvailability = _removeCompletedSlotFromAvailability(appt);
+
     setState(() {
       appt.status = "completed";
       appt.completedAt = DateTime.now();
@@ -114,6 +151,9 @@ class _DoctorAppointmentsScreenState extends State<DoctorAppointmentsScreen> {
     });
 
     await FirestoreDataService.instance.saveAppointment(appt);
+    if (removedFromAvailability) {
+      await FirestoreDataService.instance.saveDoctor(widget.doctor);
+    }
     await FirestoreDataService.instance.syncAllToAppState();
     AppState.patientNotifications.add(
       "Your appointment with Dr. ${widget.doctor.name} has been marked completed. You can now leave feedback.",

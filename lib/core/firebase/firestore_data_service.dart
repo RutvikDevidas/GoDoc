@@ -436,6 +436,25 @@ class FirestoreDataService {
     await _appointments.doc(appointment.id).set(appointment.toMap());
   }
 
+  void mergeAppointmentsIntoAppState(
+    Iterable<AppointmentModel> appointments, {
+    String? doctorUsername,
+    String? patientUsername,
+  }) {
+    final mergedAppointments = AppState.appointments.where((appointment) {
+      final matchesDoctor = doctorUsername == null
+          ? true
+          : appointment.doctorUsername == doctorUsername;
+      final matchesPatient = patientUsername == null
+          ? true
+          : appointment.patientUsername == patientUsername;
+      return !(matchesDoctor && matchesPatient);
+    }).toList();
+
+    mergedAppointments.addAll(appointments);
+    AppState.appointments = mergedAppointments;
+  }
+
   Future<void> updateAppointment(
     String appointmentId,
     Map<String, dynamic> updates,

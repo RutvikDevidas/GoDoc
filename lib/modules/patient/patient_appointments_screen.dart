@@ -31,7 +31,10 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
     _appointmentSubscription = FirestoreDataService.instance
         .watchAppointments(patientUsername: widget.patient.username)
         .listen((appointments) {
-          AppState.appointments = appointments;
+          FirestoreDataService.instance.mergeAppointmentsIntoAppState(
+            appointments,
+            patientUsername: widget.patient.username,
+          );
           if (mounted) {
             setState(() {});
           }

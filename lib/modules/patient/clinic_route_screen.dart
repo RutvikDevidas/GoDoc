@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -68,6 +69,14 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   }
 
   Future<Position> _determinePosition() async {
+    if (kIsWeb) {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(const Duration(seconds: 12));
+      _locationPermissionGranted = true;
+      return position;
+    }
+
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       throw Exception('Location services are disabled.');
@@ -203,10 +212,12 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
           LatLng(widget.clinicLatitude, widget.clinicLongitude),
         ],
         color: Theme.of(context).colorScheme.primary,
-        width: 6,
+        width: 7,
         geodesic: true,
         startCap: Cap.roundCap,
         endCap: Cap.roundCap,
+        visible: true,
+        zIndex: 1,
       ),
     };
   }
@@ -232,6 +243,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
                 target: LatLng(widget.clinicLatitude, widget.clinicLongitude),
                 zoom: 14,
               ),
+              mapType: MapType.normal,
               markers: _markers,
               polylines: _polylines,
               myLocationEnabled: _locationPermissionGranted,

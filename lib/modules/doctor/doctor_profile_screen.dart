@@ -167,62 +167,71 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
             const SizedBox(height: 16),
             _InfoSection(
               title: "Available schedule",
-              child: Column(
-                children: doctor.availability
-                    .map(
-                      (slot) => Padding(
-                        padding: const EdgeInsets.only(bottom: 12),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Container(
-                              width: 68,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 12,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.accent,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Text(
-                                DateFormat('dd\nMMM').format(slot.date),
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w800,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
+              child: doctor.availability.isEmpty
+                  ? const Text(
+                      "No available slots right now. Add a new day and time slot from Edit Profile.",
+                      style: TextStyle(
+                        color: AppColors.mutedText,
+                        height: 1.5,
+                      ),
+                    )
+                  : Column(
+                      children: doctor.availability
+                          .map(
+                            (slot) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(
-                                    DateFormat('EEEE').format(slot.date),
-                                    style: const TextStyle(
-                                      color: AppColors.darkText,
-                                      fontWeight: FontWeight.w700,
+                                  Container(
+                                    width: 68,
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 12,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.accent,
+                                      borderRadius: BorderRadius.circular(18),
+                                    ),
+                                    child: Text(
+                                      DateFormat('dd\nMMM').format(slot.date),
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: AppColors.primary,
+                                        fontWeight: FontWeight.w800,
+                                      ),
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    slot.timeSlots.join(" | "),
-                                    style: const TextStyle(
-                                      color: AppColors.mutedText,
-                                      height: 1.4,
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          DateFormat('EEEE').format(slot.date),
+                                          style: const TextStyle(
+                                            color: AppColors.darkText,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          slot.timeSlots.join(" | "),
+                                          style: const TextStyle(
+                                            color: AppColors.mutedText,
+                                            height: 1.4,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                          ],
-                        ),
-                      ),
-                    )
-                    .toList(),
-              ),
+                          )
+                          .toList(),
+                    ),
             ),
           ],
         ),
