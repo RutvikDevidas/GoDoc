@@ -2,8 +2,9 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:latlong2/latlong.dart' as latlng;
 
 import '../../core/constants/app_colors.dart';
 import '../../models/doctor_model.dart';
@@ -426,8 +427,6 @@ class _ClinicMapPreview extends StatefulWidget {
 }
 
 class _ClinicMapPreviewState extends State<_ClinicMapPreview> {
-  final Completer<GoogleMapController> _controller = Completer();
-
   void _openRouteScreen() {
     Navigator.push(
       context,
@@ -444,68 +443,6 @@ class _ClinicMapPreviewState extends State<_ClinicMapPreview> {
 
   @override
   Widget build(BuildContext context) {
-    if (kIsWeb) {
-      return GestureDetector(
-        onTap: _openRouteScreen,
-        child: Container(
-          width: double.infinity,
-          height: 180,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(22),
-            border: Border.all(color: AppColors.border),
-            gradient: const LinearGradient(
-              colors: [Color(0xFFE8F3F5), Color(0xFFF5FBFC)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-          ),
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 46,
-                height: 46,
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(
-                  Icons.map_outlined,
-                  color: AppColors.primary,
-                ),
-              ),
-              const SizedBox(height: 14),
-              const Text(
-                "Open clinic route",
-                style: TextStyle(
-                  color: AppColors.darkText,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                "${widget.latitude.toStringAsFixed(4)}, ${widget.longitude.toStringAsFixed(4)}",
-                style: const TextStyle(
-                  color: AppColors.mutedText,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const Spacer(),
-              const Text(
-                "Tap to view route",
-                style: TextStyle(
-                  color: AppColors.primary,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
     return GestureDetector(
       onTap: _openRouteScreen,
       child: Container(
@@ -518,33 +455,34 @@ class _ClinicMapPreviewState extends State<_ClinicMapPreview> {
         clipBehavior: Clip.hardEdge,
         child: Stack(
           children: [
-            GoogleMap(
-              initialCameraPosition: CameraPosition(
-                target: LatLng(widget.latitude, widget.longitude),
-                zoom: 14,
-              ),
-              markers: {
-                Marker(
-                  markerId: const MarkerId('clinic_marker'),
-                  position: LatLng(widget.latitude, widget.longitude),
-                  infoWindow: InfoWindow(
-                    title: widget.clinicName,
-                    snippet: widget.clinicAddress,
-                  ),
+            FlutterMap(
+              options: MapOptions(
+                initialCenter: latlng.LatLng(widget.latitude, widget.longitude),
+                initialZoom: 14,
+                interactionOptions: const InteractionOptions(
+                  flags: InteractiveFlag.none,
                 ),
-              },
-              zoomControlsEnabled: false,
-              zoomGesturesEnabled: false,
-              scrollGesturesEnabled: false,
-              rotateGesturesEnabled: false,
-              tiltGesturesEnabled: false,
-              myLocationEnabled: false,
-              myLocationButtonEnabled: false,
-              onMapCreated: (controller) {
-                if (!_controller.isCompleted) {
-                  _controller.complete(controller);
-                }
-              },
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.example.godoc',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: latlng.LatLng(widget.latitude, widget.longitude),
+                      width: 56,
+                      height: 56,
+                      child: const Icon(
+                        Icons.location_on_rounded,
+                        color: AppColors.danger,
+                        size: 40,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
             Container(
               decoration: BoxDecoration(

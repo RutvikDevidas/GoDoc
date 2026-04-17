@@ -1,12 +1,14 @@
 import 'dart:math';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/payment/razorpay_config.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
@@ -26,6 +28,8 @@ class _BookingScreenState extends State<BookingScreen> {
   String? selectedTime;
   String type = "Offline";
   bool _isSubmitting = false;
+  late final Razorpay _razorpay;
+  Completer<_PaymentResult?>? _paymentCompleter;
 
   bool _isSameCalendarDay(DateTime first, DateTime second) {
     return first.year == second.year &&
@@ -51,7 +55,18 @@ class _BookingScreenState extends State<BookingScreen> {
   @override
   void initState() {
     super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _handlePaymentSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR, _handlePaymentError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _handleExternalWallet);
     _syncSelection();
+  }
+
+  @override
+  void dispose() {
+    _paymentCompleter?.complete(null);
+    _razorpay.clear();
+    super.dispose();
   }
 
   List<DoctorAvailability> get _availableDates {
@@ -125,7 +140,7 @@ class _BookingScreenState extends State<BookingScreen> {
     );
   }
 
-  bool get _onlinePaymentConfigured => widget.doctor.upiId.trim().isNotEmpty;
+  bool get _onlinePaymentConfigured => RazorpayConfig.isConfigured;
 
   bool _hasRequiredPayment(AppointmentModel appointment) {
     if (appointment.type.toLowerCase() != 'online') {
@@ -136,180 +151,122 @@ class _BookingScreenState extends State<BookingScreen> {
         (appointment.paymentReference?.trim().isNotEmpty ?? false);
   }
 
-  Uri _buildUpiPaymentUri(String reference) {
-    return Uri(
-      scheme: 'upi',
-      host: 'pay',
-      queryParameters: {
-        'pa': widget.doctor.upiId.trim(),
-        'pn': widget.doctor.name.trim(),
-        'am': widget.doctor.consultationFee.toStringAsFixed(2),
-        'cu': 'INR',
-        'tn':
-            'GoDoc consultation for ${widget.patient.name} (${reference.trim()})',
-        'tr': reference.trim(),
-      },
+  String _normalizePaymentReference(String reference) {
+    final cleaned = reference
+        .trim()
+        .replaceAll(RegExp(r'[^A-Za-z0-9._/-]'), '')
+        .toUpperCase();
+    final shortened = cleaned.length > 30 ? cleaned.substring(0, 30) : cleaned;
+    if (shortened.isNotEmpty) {
+      return shortened;
+    }
+
+    return 'GODOC${DateTime.now().millisecondsSinceEpoch}';
+  }
+
+  void _handlePaymentSuccess(PaymentSuccessResponse response) {
+    _paymentCompleter?.complete(
+      _PaymentResult(
+        paymentId: response.paymentId,
+        orderId: response.orderId,
+        signature: response.signature,
+      ),
+    );
+    _paymentCompleter = null;
+  }
+
+  void _handlePaymentError(PaymentFailureResponse response) {
+    _paymentCompleter?.complete(null);
+    _paymentCompleter = null;
+
+    if (!mounted) return;
+    final message = response.message?.trim();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message?.isNotEmpty == true
+              ? 'Payment unsuccessful: $message'
+              : 'Payment unsuccessful. Please try again.',
+        ),
+      ),
     );
   }
 
-  Future<String?> _showPaymentSheet() async {
-    return showModalBottomSheet<String>(
-      context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        final suggestedReference =
-            'PAY-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(900) + 100}';
-        final referenceController = TextEditingController(
-          text: suggestedReference,
-        );
-        var upiLaunchAttempted = false;
-        var upiLaunchSucceeded = false;
-
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            Future<void> openUpiApp() async {
-              final reference = referenceController.text.trim().isEmpty
-                  ? suggestedReference
-                  : referenceController.text.trim();
-              referenceController.text = reference;
-
-              final launched = await launchUrl(
-                _buildUpiPaymentUri(reference),
-                mode: LaunchMode.platformDefault,
-              );
-
-              if (!context.mounted) return;
-
-              setModalState(() {
-                upiLaunchAttempted = true;
-                upiLaunchSucceeded = launched;
-              });
-
-              if (!launched) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'No UPI app was opened. You can still complete payment and enter the reference manually.',
-                    ),
-                  ),
-                );
-              }
-            }
-
-            return SafeArea(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(
-                  20,
-                  20,
-                  20,
-                  28 + MediaQuery.of(context).viewInsets.bottom,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'UPI payment',
-                      style: TextStyle(
-                        fontSize: 22,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.darkText,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Text(
-                      'Pay Rs ${widget.doctor.consultationFee.toStringAsFixed(0)} to ${widget.doctor.name} for this online consultation. Open your UPI app, complete the transfer, then confirm the payment reference here.',
-                      style: const TextStyle(
-                        color: AppColors.mutedText,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    _PaymentPreviewRow(
-                      label: 'Doctor UPI',
-                      value: widget.doctor.upiId,
-                    ),
-                    _PaymentPreviewRow(
-                      label: 'Amount',
-                      value:
-                          'Rs ${widget.doctor.consultationFee.toStringAsFixed(0)}',
-                    ),
-                    const SizedBox(height: 16),
-                    TextField(
-                      controller: referenceController,
-                      decoration: const InputDecoration(
-                        labelText: 'Payment reference',
-                        hintText: 'Enter UPI transaction ID / reference',
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    const Text(
-                      'Tip: keep the suggested reference or replace it with the final transaction ID shown by your payment app.',
-                      style: TextStyle(
-                        color: AppColors.mutedText,
-                        height: 1.4,
-                      ),
-                    ),
-                    if (upiLaunchAttempted) ...[
-                      const SizedBox(height: 10),
-                      Text(
-                        upiLaunchSucceeded
-                            ? 'UPI app opened. Complete the payment there, then come back and confirm.'
-                            : 'No UPI app opened on this device. After paying another way, enter the payment reference and confirm.',
-                        style: TextStyle(
-                          color: upiLaunchSucceeded
-                              ? AppColors.primary
-                              : Colors.orange.shade800,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: openUpiApp,
-                        child: const Text('Open UPI app'),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: OutlinedButton(
-                        onPressed: () {
-                          final reference = referenceController.text.trim();
-                          if (reference.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Enter the payment reference before confirming payment.',
-                                ),
-                              ),
-                            );
-                            return;
-                          }
-
-                          Navigator.pop(context, reference);
-                        },
-                        child: const Text('I have completed payment'),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          },
-        );
-      },
+  void _handleExternalWallet(ExternalWalletResponse response) {
+    if (!mounted) return;
+    final walletName = response.walletName?.trim();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          walletName?.isNotEmpty == true
+              ? 'Continue the payment in $walletName.'
+              : 'Continue the payment in the selected wallet.',
+        ),
+      ),
     );
+  }
+
+  Future<_PaymentResult?> _startRazorpayPayment() async {
+    if (!RazorpayConfig.isConfigured) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Online payment is unavailable until a Razorpay key is added.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+
+    final receipt = _normalizePaymentReference(
+      'GODOC${DateTime.now().millisecondsSinceEpoch}${Random().nextInt(900) + 100}',
+    );
+
+    final completer = Completer<_PaymentResult?>();
+    _paymentCompleter?.complete(null);
+    _paymentCompleter = completer;
+
+    final options = {
+      'key': RazorpayConfig.keyId,
+      'amount': (widget.doctor.consultationFee * 100).round(),
+      'name': RazorpayConfig.merchantName,
+      'description': 'Consultation with ${widget.doctor.name}',
+      'prefill': {
+        'contact': widget.patient.phone.trim(),
+        'email': widget.patient.email.trim(),
+      },
+      'notes': {
+        'patient_username': widget.patient.username,
+        'patient_name': widget.patient.name,
+        'doctor_username': widget.doctor.username,
+        'doctor_name': widget.doctor.name,
+        'appointment_type': type,
+        'receipt': receipt,
+      },
+      'theme': {
+        'color': '#0F766E',
+      },
+    };
+
+    try {
+      _razorpay.open(options);
+    } catch (_) {
+      _paymentCompleter = null;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Could not start Razorpay checkout. Please verify the Razorpay setup.',
+            ),
+          ),
+        );
+      }
+      return null;
+    }
+
+    return completer.future;
   }
 
   Future<void> bookAppointment() async {
@@ -319,7 +276,7 @@ class _BookingScreenState extends State<BookingScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Online consultation is unavailable because the doctor has not added payment details yet.',
+            'Online payment is unavailable because Razorpay is not configured yet.',
           ),
         ),
       );
@@ -337,14 +294,14 @@ class _BookingScreenState extends State<BookingScreen> {
       DateTime? paymentPaidAt;
 
       if (type == 'Online') {
-        final paymentRef = await _showPaymentSheet();
-        if (paymentRef == null) {
+        final paymentResult = await _startRazorpayPayment();
+        if (paymentResult == null) {
           return;
         }
 
         paymentStatus = 'paid';
-        paymentMethod = 'upi';
-        paymentReference = paymentRef;
+        paymentMethod = 'razorpay';
+        paymentReference = paymentResult.reference;
         paymentPaidAt = DateTime.now();
       }
 
@@ -844,6 +801,27 @@ class _EmptyBookingState extends StatelessWidget {
   }
 }
 
+class _PaymentResult {
+  final String? paymentId;
+  final String? orderId;
+  final String? signature;
+
+  const _PaymentResult({
+    this.paymentId,
+    this.orderId,
+    this.signature,
+  });
+
+  String get reference =>
+      paymentId?.trim().isNotEmpty == true
+          ? paymentId!.trim()
+          : orderId?.trim().isNotEmpty == true
+          ? orderId!.trim()
+          : signature?.trim().isNotEmpty == true
+          ? signature!.trim()
+          : 'razorpay-${DateTime.now().millisecondsSinceEpoch}';
+}
+
 class _PaymentDetailsCard extends StatelessWidget {
   final DoctorModel doctor;
 
@@ -869,58 +847,32 @@ class _PaymentDetailsCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 10),
-          if (doctor.upiId.trim().isNotEmpty)
-            Text(
-              "UPI ID: ${doctor.upiId}",
-              style: const TextStyle(
+          if (RazorpayConfig.isConfigured)
+            const Text(
+              "Razorpay checkout is enabled for online consultation payments. UPI apps such as GPay should appear inside Razorpay checkout when available.",
+              style: TextStyle(
                 color: AppColors.darkText,
                 fontWeight: FontWeight.w600,
               ),
             ),
-          const SizedBox(height: 10),
+          if (!RazorpayConfig.isConfigured)
+            const Text(
+              "Online payment is not ready yet. Add a valid Razorpay key in the app configuration to enable online consultation booking.",
+              style: TextStyle(
+                color: AppColors.danger,
+                height: 1.5,
+                fontWeight: FontWeight.w600,
+              ),
+            )
+          else
+            const SizedBox.shrink(),
+          if (RazorpayConfig.isConfigured)
+            const SizedBox(height: 10),
           const Text(
-            "Payment is compulsory for online consultations. The booking is created only after payment is marked successful.",
+            "Payment is compulsory for online consultations. The booking is created only after Razorpay reports the payment as successful.",
             style: TextStyle(
               color: AppColors.mutedText,
               height: 1.5,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PaymentPreviewRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _PaymentPreviewRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 88,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.mutedText,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(
-                color: AppColors.darkText,
-                fontWeight: FontWeight.w700,
-              ),
             ),
           ),
         ],

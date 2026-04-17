@@ -28,6 +28,18 @@ class FirestoreDataService {
   CollectionReference<Map<String, dynamic>> get _appointments =>
       _godocRoot.collection('appointments');
 
+  DocumentReference<Map<String, dynamic>> _patientDoc(String username) =>
+      _patients.doc(username);
+
+  CollectionReference<Map<String, dynamic>> _patientPayments(String username) =>
+      _patientDoc(username).collection('payments');
+
+  CollectionReference<Map<String, dynamic>> _patientFeedback(String username) =>
+      _patientDoc(username).collection('feedback');
+
+  CollectionReference<Map<String, dynamic>> _patientReports(String username) =>
+      _patientDoc(username).collection('patient_reports');
+
   String _normalizedUsername(String username) => username.trim().toLowerCase();
 
   Future<List<DoctorModel>> getDoctors({bool verifiedOnly = false}) async {
@@ -226,6 +238,7 @@ class FirestoreDataService {
     );
 
     await syncAllToAppState();
+    await _backfillPatientSubcollections();
   }
 
   Future<void> syncAllToAppState() async {
@@ -250,6 +263,8 @@ class FirestoreDataService {
     AppState.appointments = appointmentsSnapshot.docs
         .map((doc) => AppointmentModel.fromMap(doc.data()))
         .toList();
+
+    await _cleanupExpiredDoctorAvailability();
   }
 
   Future<DoctorModel?> findDoctorByCredentials({
@@ -453,6 +468,8 @@ class FirestoreDataService {
   }
 
   Future<void> saveDoctor(DoctorModel doctor) async {
+    doctor.availability = normalizeUpcomingAvailability(doctor.availability);
+
     if (!firebaseAvailable) {
       final index = AppState.doctors.indexWhere(
         (existingDoctor) => existingDoctor.username == doctor.username,
@@ -504,6 +521,7 @@ class FirestoreDataService {
     }
 
     await _patients.doc(patient.username).set(patient.toMap());
+    await _syncPatientReportsSubcollection(patient);
   }
 
   Future<void> saveAppointment(AppointmentModel appointment) async {
@@ -520,6 +538,7 @@ class FirestoreDataService {
     }
 
     await _appointments.doc(appointment.id).set(appointment.toMap());
+    await _syncPatientAppointmentSubcollections(appointment);
   }
 
   void mergeAppointmentsIntoAppState(
@@ -578,6 +597,13 @@ class FirestoreDataService {
       'feedbackRating': rating,
       'feedbackComments': comments,
     });
+
+    if (!firebaseAvailable) return;
+
+    final appointment = await getAppointmentById(appointmentId);
+    if (appointment == null) return;
+
+    await _syncPatientAppointmentSubcollections(appointment);
   }
 
   Future<void> deleteDoctor(String username) async {
@@ -613,10 +639,22 @@ class FirestoreDataService {
     final appointmentSnapshot = await _appointments
         .where('patientUsername', isEqualTo: username)
         .get();
+    final paymentsSnapshot = await _patientPayments(username).get();
+    final feedbackSnapshot = await _patientFeedback(username).get();
+    final reportsSnapshot = await _patientReports(username).get();
 
     final batch = _firestore.batch();
     batch.delete(_patients.doc(username));
     for (final doc in appointmentSnapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    for (final doc in paymentsSnapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    for (final doc in feedbackSnapshot.docs) {
+      batch.delete(doc.reference);
+    }
+    for (final doc in reportsSnapshot.docs) {
       batch.delete(doc.reference);
     }
     await batch.commit();
@@ -658,6 +696,117 @@ class FirestoreDataService {
       batch.set(collection.doc(idFor(item)), mapFor(item));
     }
     await batch.commit();
+  }
+
+  Future<void> _backfillPatientSubcollections() async {
+    for (final patient in AppState.patients) {
+      await _syncPatientReportsSubcollection(patient);
+    }
+
+    for (final appointment in AppState.appointments) {
+      await _syncPatientAppointmentSubcollections(appointment);
+    }
+  }
+
+  Future<void> _cleanupExpiredDoctorAvailability() async {
+    for (final doctor in AppState.doctors) {
+      final normalizedAvailability = normalizeUpcomingAvailability(
+        doctor.availability,
+      );
+      final changed =
+          normalizedAvailability.length != doctor.availability.length ||
+          !_sameDoctorAvailability(normalizedAvailability, doctor.availability);
+
+      if (!changed) continue;
+
+      doctor.availability = normalizedAvailability;
+      await _doctors.doc(doctor.username).set({
+        'availability': normalizedAvailability.map((slot) => slot.toMap()).toList(),
+      }, SetOptions(merge: true));
+    }
+  }
+
+  bool _sameDoctorAvailability(
+    List<DoctorAvailability> first,
+    List<DoctorAvailability> second,
+  ) {
+    if (first.length != second.length) return false;
+
+    for (var index = 0; index < first.length; index++) {
+      final left = first[index];
+      final right = second[index];
+      if (left.date != right.date) return false;
+      if (left.timeSlots.length != right.timeSlots.length) return false;
+
+      for (var slotIndex = 0; slotIndex < left.timeSlots.length; slotIndex++) {
+        if (left.timeSlots[slotIndex] != right.timeSlots[slotIndex]) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  Future<void> _syncPatientReportsSubcollection(PatientModel patient) async {
+    final reportsCollection = _patientReports(patient.username);
+    final existingReports = await reportsCollection.get();
+    final batch = _firestore.batch();
+
+    for (final doc in existingReports.docs) {
+      batch.delete(doc.reference);
+    }
+
+    for (var index = 0; index < patient.medicalReports.length; index++) {
+      final report = patient.medicalReports[index];
+      final docId = 'report_${(index + 1).toString().padLeft(3, '0')}';
+      batch.set(reportsCollection.doc(docId), {
+        ...report.toMap(),
+        'patientUsername': patient.username,
+        'reportIndex': index,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> _syncPatientAppointmentSubcollections(
+    AppointmentModel appointment,
+  ) async {
+    final patientUsername = appointment.patientUsername.trim();
+    if (patientUsername.isEmpty) return;
+
+    await _patientPayments(patientUsername).doc(appointment.id).set({
+      'appointmentId': appointment.id,
+      'patientUsername': appointment.patientUsername,
+      'doctorUsername': appointment.doctorUsername,
+      'date': appointment.date,
+      'time': appointment.time,
+      'type': appointment.type,
+      'status': appointment.status,
+      'paymentStatus': appointment.paymentStatus,
+      'paymentMethod': appointment.paymentMethod,
+      'paymentReference': appointment.paymentReference,
+      'paymentAmount': appointment.paymentAmount,
+      'paymentPaidAt': appointment.paymentPaidAt?.toIso8601String(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _patientFeedback(patientUsername).doc(appointment.id).set({
+      'appointmentId': appointment.id,
+      'patientUsername': appointment.patientUsername,
+      'doctorUsername': appointment.doctorUsername,
+      'date': appointment.date,
+      'time': appointment.time,
+      'type': appointment.type,
+      'status': appointment.status,
+      'feedbackSubmitted': appointment.feedbackSubmitted,
+      'feedbackRating': appointment.feedbackRating,
+      'feedbackComments': appointment.feedbackComments,
+      'completedAt': appointment.completedAt?.toIso8601String(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
   }
 }
 

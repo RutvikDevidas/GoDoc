@@ -1,11 +1,9 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:latlong2/latlong.dart' as latlng;
 
 class ClinicLocationResult {
@@ -39,13 +37,11 @@ class ClinicLocationPickerScreen extends StatefulWidget {
 
 class _ClinicLocationPickerScreenState
     extends State<ClinicLocationPickerScreen> {
-  static const gmaps.LatLng _defaultCenter = gmaps.LatLng(28.6139, 77.2090);
+  static const latlng.LatLng _defaultCenter = latlng.LatLng(28.6139, 77.2090);
 
-  final Completer<gmaps.GoogleMapController> _googleMapController =
-      Completer();
-  final MapController _webMapController = MapController();
+  final MapController _mapController = MapController();
 
-  gmaps.LatLng? _selectedLocation;
+  latlng.LatLng? _selectedLocation;
   String? _selectedAddress;
   bool _saving = false;
   bool _loadingCurrentLocation = false;
@@ -54,7 +50,7 @@ class _ClinicLocationPickerScreenState
   void initState() {
     super.initState();
     if (widget.initialLatitude != null && widget.initialLongitude != null) {
-      _selectedLocation = gmaps.LatLng(
+      _selectedLocation = latlng.LatLng(
         widget.initialLatitude!,
         widget.initialLongitude!,
       );
@@ -62,9 +58,9 @@ class _ClinicLocationPickerScreenState
     _selectedAddress = widget.initialAddress?.trim();
   }
 
-  gmaps.LatLng get _initialCameraTarget => _selectedLocation ?? _defaultCenter;
+  latlng.LatLng get _initialCameraTarget => _selectedLocation ?? _defaultCenter;
 
-  Future<void> _setSelectedLocation(gmaps.LatLng location) async {
+  Future<void> _setSelectedLocation(latlng.LatLng location) async {
     setState(() {
       _selectedLocation = location;
       _saving = true;
@@ -137,21 +133,14 @@ class _ClinicLocationPickerScreenState
 
     try {
       final position = await _determinePosition();
-      final location = gmaps.LatLng(position.latitude, position.longitude);
+      final location = latlng.LatLng(position.latitude, position.longitude);
 
       await _setSelectedLocation(location);
 
-      if (kIsWeb) {
-        _webMapController.move(
-          latlng.LatLng(location.latitude, location.longitude),
-          16,
-        );
-      } else {
-        final controller = await _googleMapController.future;
-        await controller.animateCamera(
-          gmaps.CameraUpdate.newLatLngZoom(location, 16),
-        );
-      }
+      _mapController.move(
+        latlng.LatLng(location.latitude, location.longitude),
+        16,
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -166,12 +155,6 @@ class _ClinicLocationPickerScreenState
   }
 
   Future<Position> _determinePosition() async {
-    if (kIsWeb) {
-      return Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(const Duration(seconds: 12));
-    }
-
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       throw Exception('Location services are disabled.');
@@ -222,79 +205,45 @@ class _ClinicLocationPickerScreenState
     );
   }
 
-  Widget _buildMap(gmaps.LatLng? selectedLocation) {
-    if (kIsWeb) {
-      return FlutterMap(
-        mapController: _webMapController,
-        options: MapOptions(
-          initialCenter: latlng.LatLng(
-            _initialCameraTarget.latitude,
-            _initialCameraTarget.longitude,
-          ),
-          initialZoom: selectedLocation == null ? 11 : 16,
-          onTap: (_, point) {
-            _setSelectedLocation(
-              gmaps.LatLng(point.latitude, point.longitude),
-            );
-          },
+  Widget _buildMap(latlng.LatLng? selectedLocation) {
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: latlng.LatLng(
+          _initialCameraTarget.latitude,
+          _initialCameraTarget.longitude,
         ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.godoc',
-          ),
-          if (selectedLocation != null)
-            MarkerLayer(
-              markers: [
-                Marker(
-                  point: latlng.LatLng(
-                    selectedLocation.latitude,
-                    selectedLocation.longitude,
-                  ),
-                  width: 56,
-                  height: 56,
-                  child: const Icon(
-                    Icons.location_pin,
-                    size: 42,
-                    color: Colors.red,
-                  ),
-                ),
-              ],
-            ),
-        ],
-      );
-    }
-
-    return gmaps.GoogleMap(
-      initialCameraPosition: gmaps.CameraPosition(
-        target: _initialCameraTarget,
-        zoom: selectedLocation == null ? 11 : 16,
+        initialZoom: selectedLocation == null ? 11 : 16,
+        onTap: (_, point) {
+          _setSelectedLocation(
+            latlng.LatLng(point.latitude, point.longitude),
+          );
+        },
       ),
-      myLocationButtonEnabled: false,
-      myLocationEnabled: true,
-      onTap: _setSelectedLocation,
-      onMapCreated: (controller) {
-        if (!_googleMapController.isCompleted) {
-          _googleMapController.complete(controller);
-        }
-      },
-      markers: selectedLocation == null
-          ? const <gmaps.Marker>{}
-          : <gmaps.Marker>{
-              gmaps.Marker(
-                markerId: const gmaps.MarkerId('clinic-location'),
-                position: selectedLocation,
-                infoWindow: gmaps.InfoWindow(
-                  title: 'Selected clinic',
-                  snippet:
-                      _selectedAddress ??
-                      _formatCoordinates(
-                        selectedLocation.latitude,
-                        selectedLocation.longitude,
-                      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.example.godoc',
+        ),
+        if (selectedLocation != null)
+          MarkerLayer(
+            markers: [
+              Marker(
+                point: latlng.LatLng(
+                  selectedLocation.latitude,
+                  selectedLocation.longitude,
+                ),
+                width: 56,
+                height: 56,
+                child: const Icon(
+                  Icons.location_pin,
+                  size: 42,
+                  color: Colors.red,
                 ),
               ),
-            },
+            ],
+          ),
+      ],
     );
   }
 

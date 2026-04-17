@@ -24,6 +24,32 @@ class DoctorAvailability {
   }
 }
 
+DateTime _calendarDay(DateTime value) {
+  return DateTime(value.year, value.month, value.day);
+}
+
+List<DoctorAvailability> normalizeUpcomingAvailability(
+  Iterable<DoctorAvailability> availability,
+) {
+  final today = _calendarDay(DateTime.now());
+
+  final normalized = availability
+      .map(
+        (slot) => DoctorAvailability(
+          date: _calendarDay(slot.date),
+          timeSlots: slot.timeSlots
+              .map((time) => time.trim())
+              .where((time) => time.isNotEmpty)
+              .toList(),
+        ),
+      )
+      .where((slot) => !slot.date.isBefore(today) && slot.timeSlots.isNotEmpty)
+      .toList()
+    ..sort((a, b) => a.date.compareTo(b.date));
+
+  return normalized;
+}
+
 class DoctorModel {
   String username;
   String password;
@@ -88,7 +114,9 @@ class DoctorModel {
        bankName = bankName ?? '',
        bankAccountNumber = bankAccountNumber ?? '',
        bankIfscCode = bankIfscCode ?? '',
-       availability = availability ?? _defaultAvailability();
+       availability = normalizeUpcomingAvailability(
+         availability ?? _defaultAvailability(),
+       );
 
   static String _defaultBio(
     String name,
@@ -180,14 +208,15 @@ class DoctorModel {
       profileImageData: map['profileImageData']?.toString(),
       consultationFee: (map['consultationFee'] as num?)?.toDouble() ?? 500,
       availability: rawAvailability is List
-          ? rawAvailability
-                .whereType<Map>()
-                .map(
-                  (slot) => DoctorAvailability.fromMap(
-                    Map<String, dynamic>.from(slot),
+          ? normalizeUpcomingAvailability(
+              rawAvailability
+                  .whereType<Map>()
+                  .map(
+                    (slot) => DoctorAvailability.fromMap(
+                      Map<String, dynamic>.from(slot),
+                    ),
                   ),
-                )
-                .toList()
+            )
           : null,
       verified: map['verified'] == true,
       rejected: map['rejected'] == true,

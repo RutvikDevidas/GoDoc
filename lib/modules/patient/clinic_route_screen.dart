@@ -1,12 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:google_maps_flutter/google_maps_flutter.dart' as gmaps;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' as latlng;
 
@@ -31,12 +29,10 @@ class ClinicRouteScreen extends StatefulWidget {
 }
 
 class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
-  final Completer<gmaps.GoogleMapController> _googleMapController =
-      Completer();
-  final MapController _webMapController = MapController();
+  final MapController _mapController = MapController();
   StreamSubscription<Position>? _positionStreamSubscription;
   Position? _userPosition;
-  List<gmaps.LatLng> _routePoints = const [];
+  List<latlng.LatLng> _routePoints = const [];
   String? _currentLocationAddress;
   String? _error;
   bool _loading = true;
@@ -94,14 +90,6 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   }
 
   Future<Position> _determinePosition() async {
-    if (kIsWeb) {
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
-      ).timeout(const Duration(seconds: 12));
-      _locationPermissionGranted = true;
-      return position;
-    }
-
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       throw Exception('Location services are disabled.');
@@ -266,7 +254,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
           .whereType<List<dynamic>>()
           .where((point) => point.length >= 2)
           .map(
-            (point) => gmaps.LatLng(
+            (point) => latlng.LatLng(
               (point[1] as num).toDouble(),
               (point[0] as num).toDouble(),
             ),
@@ -277,8 +265,8 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       setState(() {
         _routePoints = points.isEmpty
             ? [
-                gmaps.LatLng(originLat, originLon),
-                gmaps.LatLng(destinationLat, destinationLon),
+                latlng.LatLng(originLat, originLon),
+                latlng.LatLng(destinationLat, destinationLon),
               ]
             : points;
         _routeDistanceMeters = (bestRoute['distance'] as num?)?.toDouble();
@@ -289,8 +277,8 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       if (!mounted) return;
       setState(() {
         _routePoints = [
-          gmaps.LatLng(originLat, originLon),
-          gmaps.LatLng(destinationLat, destinationLon),
+          latlng.LatLng(originLat, originLon),
+          latlng.LatLng(destinationLat, destinationLon),
         ];
         _routeDistanceMeters = _distanceMeters;
         _routeDurationSeconds = null;
@@ -307,72 +295,42 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   Future<void> _moveCameraToBounds() async {
     if (_userPosition == null) return;
 
-    final clinic = gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude);
-    final user = gmaps.LatLng(_userPosition!.latitude, _userPosition!.longitude);
+    final clinic = latlng.LatLng(widget.clinicLatitude, widget.clinicLongitude);
+    final user = latlng.LatLng(_userPosition!.latitude, _userPosition!.longitude);
     final latitudeDelta = (clinic.latitude - user.latitude).abs();
     final longitudeDelta = (clinic.longitude - user.longitude).abs();
 
     if (latitudeDelta < 0.0005 && longitudeDelta < 0.0005) {
-      if (kIsWeb) {
-        _webMapController.move(
-          latlng.LatLng(clinic.latitude, clinic.longitude),
-          17,
-        );
-      } else {
-        final controller = await _googleMapController.future;
-        await controller.animateCamera(
-          gmaps.CameraUpdate.newLatLngZoom(clinic, 17),
-        );
-      }
+      _mapController.move(
+        latlng.LatLng(clinic.latitude, clinic.longitude),
+        17,
+      );
       return;
     }
 
-    final bounds = gmaps.LatLngBounds(
-      southwest: gmaps.LatLng(
+    final bounds = LatLngBounds(
+      latlng.LatLng(
         (clinic.latitude < user.latitude) ? clinic.latitude : user.latitude,
         (clinic.longitude < user.longitude) ? clinic.longitude : user.longitude,
       ),
-      northeast: gmaps.LatLng(
+      latlng.LatLng(
         (clinic.latitude > user.latitude) ? clinic.latitude : user.latitude,
         (clinic.longitude > user.longitude) ? clinic.longitude : user.longitude,
       ),
     );
 
     try {
-      if (kIsWeb) {
-        _webMapController.fitCamera(
-          CameraFit.bounds(
-            bounds: LatLngBounds(
-              latlng.LatLng(
-                bounds.southwest.latitude,
-                bounds.southwest.longitude,
-              ),
-              latlng.LatLng(
-                bounds.northeast.latitude,
-                bounds.northeast.longitude,
-              ),
-            ),
-            padding: const EdgeInsets.all(48),
-          ),
-        );
-      } else {
-        final controller = await _googleMapController.future;
-        await controller.animateCamera(
-          gmaps.CameraUpdate.newLatLngBounds(bounds, 64),
-        );
-      }
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: bounds,
+          padding: const EdgeInsets.all(48),
+        ),
+      );
     } catch (_) {
-      if (kIsWeb) {
-        _webMapController.move(
-          latlng.LatLng(clinic.latitude, clinic.longitude),
-          14,
-        );
-      } else {
-        final controller = await _googleMapController.future;
-        await controller.animateCamera(
-          gmaps.CameraUpdate.newLatLngZoom(clinic, 14),
-        );
-      }
+      _mapController.move(
+        latlng.LatLng(clinic.latitude, clinic.longitude),
+        14,
+      );
     }
   }
 
@@ -398,60 +356,6 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       _userPosition!.latitude,
       _userPosition!.longitude,
     );
-  }
-
-  Set<gmaps.Marker> get _markers {
-    final markers = <gmaps.Marker>{
-      gmaps.Marker(
-        markerId: const gmaps.MarkerId('clinic'),
-        position: gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude),
-        infoWindow: gmaps.InfoWindow(
-          title: widget.clinicName,
-          snippet: widget.clinicAddress,
-        ),
-      ),
-    };
-
-    if (_userPosition != null) {
-      markers.add(
-        gmaps.Marker(
-          markerId: const gmaps.MarkerId('you'),
-          position: gmaps.LatLng(
-            _userPosition!.latitude,
-            _userPosition!.longitude,
-          ),
-          infoWindow: const gmaps.InfoWindow(title: 'You'),
-          icon: gmaps.BitmapDescriptor.defaultMarkerWithHue(
-            gmaps.BitmapDescriptor.hueAzure,
-          ),
-        ),
-      );
-    }
-
-    return markers;
-  }
-
-  Set<gmaps.Polyline> get _polylines {
-    if (_userPosition == null) return const <gmaps.Polyline>{};
-
-    return {
-      gmaps.Polyline(
-        polylineId: const gmaps.PolylineId('route'),
-        points: _routePoints.isEmpty
-            ? [
-                gmaps.LatLng(_userPosition!.latitude, _userPosition!.longitude),
-                gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude),
-              ]
-            : _routePoints,
-        color: Theme.of(context).colorScheme.primary,
-        width: 7,
-        geodesic: false,
-        startCap: gmaps.Cap.roundCap,
-        endCap: gmaps.Cap.roundCap,
-        visible: true,
-        zIndex: 1,
-      ),
-    };
   }
 
   String get _distanceLabel {
@@ -481,6 +385,24 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
 
   String get _currentLocationLabel {
     return _currentLocationAddress ?? 'Detecting your current location...';
+  }
+
+  String get _currentLocationCoordinates {
+    final userPosition = _userPosition;
+    if (userPosition == null) {
+      return '';
+    }
+
+    return '${userPosition.latitude.toStringAsFixed(5)}, ${userPosition.longitude.toStringAsFixed(5)}';
+  }
+
+  bool get _showCurrentLocationCoordinates {
+    final coordinates = _currentLocationCoordinates;
+    if (coordinates.isEmpty) {
+      return false;
+    }
+
+    return _currentLocationAddress != coordinates;
   }
 
   Future<void> _recenterMap() async {
@@ -557,7 +479,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
               Text(
                 _usingFallbackRoute
                     ? 'Using a direct fallback line until the road route is available.'
-                    : 'Route starts from the patient’s current live location.',
+                    : 'Using your current live location as the route start and the clinic location as the destination.',
                 style: const TextStyle(
                   color: AppColors.mutedText,
                   fontSize: 13,
@@ -572,88 +494,62 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   }
 
   Widget _buildMap() {
-    if (kIsWeb) {
-      return FlutterMap(
-        mapController: _webMapController,
-        options: MapOptions(
-          initialCenter: latlng.LatLng(
-            widget.clinicLatitude,
-            widget.clinicLongitude,
-          ),
-          initialZoom: 14,
+    return FlutterMap(
+      mapController: _mapController,
+      options: MapOptions(
+        initialCenter: latlng.LatLng(
+          widget.clinicLatitude,
+          widget.clinicLongitude,
         ),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.godoc',
-          ),
-          if (_routePoints.isNotEmpty)
-            PolylineLayer(
-              polylines: [
-                Polyline(
-                  points: _routePoints
-                      .map(
-                        (point) => latlng.LatLng(
-                          point.latitude,
-                          point.longitude,
-                        ),
-                      )
-                      .toList(growable: false),
-                  strokeWidth: 5,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
-              ],
-            ),
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: latlng.LatLng(
-                  widget.clinicLatitude,
-                  widget.clinicLongitude,
-                ),
-                width: 52,
-                height: 52,
-                child: const Icon(
-                  Icons.local_hospital_rounded,
-                  size: 36,
-                  color: Colors.red,
-                ),
+        initialZoom: 14,
+      ),
+      children: [
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+          userAgentPackageName: 'com.example.godoc',
+        ),
+        if (_routePoints.isNotEmpty)
+          PolylineLayer(
+            polylines: [
+              Polyline(
+                points: _routePoints,
+                strokeWidth: 5,
+                color: Theme.of(context).colorScheme.primary,
               ),
-              if (_userPosition != null)
-                Marker(
-                  point: latlng.LatLng(
-                    _userPosition!.latitude,
-                    _userPosition!.longitude,
-                  ),
-                  width: 48,
-                  height: 48,
-                  child: const Icon(
-                    Icons.my_location_rounded,
-                    size: 28,
-                    color: Colors.blue,
-                  ),
-                ),
             ],
           ),
-        ],
-      );
-    }
-
-    return gmaps.GoogleMap(
-      initialCameraPosition: gmaps.CameraPosition(
-        target: gmaps.LatLng(widget.clinicLatitude, widget.clinicLongitude),
-        zoom: 14,
-      ),
-      mapType: gmaps.MapType.normal,
-      markers: _markers,
-      polylines: _polylines,
-      myLocationEnabled: _locationPermissionGranted,
-      myLocationButtonEnabled: _locationPermissionGranted,
-      onMapCreated: (controller) {
-        if (!_googleMapController.isCompleted) {
-          _googleMapController.complete(controller);
-        }
-      },
+        MarkerLayer(
+          markers: [
+            Marker(
+              point: latlng.LatLng(
+                widget.clinicLatitude,
+                widget.clinicLongitude,
+              ),
+              width: 52,
+              height: 52,
+              child: const Icon(
+                Icons.local_hospital_rounded,
+                size: 36,
+                color: Colors.red,
+              ),
+            ),
+            if (_userPosition != null)
+              Marker(
+                point: latlng.LatLng(
+                  _userPosition!.latitude,
+                  _userPosition!.longitude,
+                ),
+                width: 48,
+                height: 48,
+                child: const Icon(
+                  Icons.my_location_rounded,
+                  size: 28,
+                  color: Colors.blue,
+                ),
+              ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -770,7 +666,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'From',
+                        'From your current live location',
                         style: TextStyle(
                           color: AppColors.mutedText,
                           fontSize: 12,
@@ -786,6 +682,17 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
                           height: 1.35,
                         ),
                       ),
+                      if (_showCurrentLocationCoordinates) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          _currentLocationCoordinates,
+                          style: const TextStyle(
+                            color: AppColors.mutedText,
+                            fontSize: 12,
+                            height: 1.35,
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -806,7 +713,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'To',
+                        'To clinic location',
                         style: TextStyle(
                           color: AppColors.mutedText,
                           fontSize: 12,
@@ -819,6 +726,15 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
                         style: const TextStyle(
                           color: AppColors.darkText,
                           fontWeight: FontWeight.w600,
+                          height: 1.35,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${widget.clinicLatitude.toStringAsFixed(5)}, ${widget.clinicLongitude.toStringAsFixed(5)}',
+                        style: const TextStyle(
+                          color: AppColors.mutedText,
+                          fontSize: 12,
                           height: 1.35,
                         ),
                       ),

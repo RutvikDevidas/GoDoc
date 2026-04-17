@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
+import 'package:latlong2/latlong.dart' as latlng;
 
 import '../../core/constants/app_colors.dart';
 import '../../models/doctor_model.dart';
@@ -356,23 +358,51 @@ class _LocationPreviewCard extends StatelessWidget {
       width: double.infinity,
       height: 150,
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFFE7F3FF), Color(0xFFE8F8F2)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
         borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppColors.border),
       ),
+      clipBehavior: Clip.hardEdge,
       child: Stack(
         children: [
-          Positioned.fill(
-            child: CustomPaint(painter: _ProfileMapPainter()),
+          FlutterMap(
+            options: MapOptions(
+              initialCenter: latlng.LatLng(latitude, longitude),
+              initialZoom: 14,
+              interactionOptions: const InteractionOptions(
+                flags: InteractiveFlag.none,
+              ),
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.godoc',
+              ),
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: latlng.LatLng(latitude, longitude),
+                    width: 56,
+                    height: 56,
+                    child: const Icon(
+                      Icons.location_on_rounded,
+                      color: AppColors.danger,
+                      size: 40,
+                    ),
+                  ),
+                ],
+              ),
+            ],
           ),
-          const Center(
-            child: Icon(
-              Icons.location_on_rounded,
-              color: AppColors.danger,
-              size: 30,
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.0),
+                  Colors.black.withOpacity(0.25),
+                ],
+              ),
             ),
           ),
           Positioned(
@@ -381,7 +411,7 @@ class _LocationPreviewCard extends StatelessWidget {
             child: Text(
               "${latitude.toStringAsFixed(4)}, ${longitude.toStringAsFixed(4)}",
               style: const TextStyle(
-                color: AppColors.darkText,
+                color: Colors.white,
                 fontWeight: FontWeight.w700,
               ),
             ),
@@ -390,23 +420,4 @@ class _LocationPreviewCard extends StatelessWidget {
       ),
     );
   }
-}
-
-class _ProfileMapPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0x332F6E6E)
-      ..strokeWidth = 1;
-
-    for (double x = 20; x < size.width; x += 38) {
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), paint);
-    }
-    for (double y = 20; y < size.height; y += 28) {
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
