@@ -1,118 +1,132 @@
 # GoDoc
 
-GoDoc is a Flutter telemedicine application with separate doctor and patient roles.
+GoDoc is a Flutter telemedicine app built for doctor and patient workflows. It supports appointment booking, doctor-managed video consultations, clinic location selection, feedback collection, and Firebase-backed data syncing.
 
-### ✅ What it does
+## Features
 
-- **Doctors** can:
-  - view and manage appointments
-  - initiate a secure video consultation (only doctor can start the call)
-  - see call start/end timestamps
-  - review feedback submitted by patients after each visit
+- Doctor and patient login/registration flows
+- Appointment booking and management
+- Video consultations using ZEGOCLOUD
+- Clinic location and route support
+- In-app appointment and call status updates
+- Post-appointment patient feedback
+- Firebase Firestore data storage
 
-- **Patients** can:
-  - view and book appointments
-  - receive a real-time "call pending" notification when a doctor starts a call
-  - join the video call once the doctor has started it
-  - submit feedback after an appointment (online or offline)
+## Tech Stack
 
----
+- Flutter
+- Dart
+- Firebase Core
+- Cloud Firestore
+- Firebase Storage
+- ZEGOCLOUD prebuilt call UI
+- Razorpay
+- Flutter Map / Geolocator
 
-## 🧩 Core Architecture
+## Project Structure
 
-### Firebase (Firestore)
+- `lib/main.dart`: app entry point
+- `lib/core/`: shared app services, Firebase setup, theme, constants, payments, and video config
+- `lib/models/`: app data models
+- `lib/modules/auth/`: login and authentication-related screens
+- `lib/modules/doctor/`: doctor dashboard and appointment features
+- `lib/modules/patient/`: patient booking, profile, and notification features
+- `lib/modules/shared/`: shared screens such as clinic location picker
+- `lib/modules/video_call/`: video call UI
 
-- Stores collections:
-  - `doctors`
-  - `patients`
-  - `appointments`
-- `AppointmentModel` includes:
-  - doctor/patient usernames
-  - call state (`callStarted`, `callRoom`, `callStartedAt`, `callEndedAt`)
-  - feedback (`feedbackSubmitted`, `feedbackRating`, `feedbackComments`)
+## Prerequisites
 
-### Authentication
+- Flutter SDK installed
+- Android Studio or a connected Android device
+- Firebase project configured for Android, iOS, and web as needed
 
-- Custom login handled via Firestore (not Firebase Auth).
-- Credentials are stored in Firestore (`doctors` and `patients` collections).
-- Admin is hard-coded as `admin/admin`.
+## Local Setup
 
-### Video Calls (ZEGOCLOUD)
-
-- Uses `zego_uikit_prebuilt_call` for video sessions.
-- Doctor creates a room and starts the call.
-- Patients can join when the doctor has started the call.
-- Call state is tracked in Firestore so both sides stay in sync.
-
-### Notifications (Call Pending)
-
-- Patients listen to their appointment documents via Firestore snapshot streams.
-- When `callStarted` is set, patients get an in-app SnackBar notification.
-
----
-
-## 📁 Key Code Locations
-
-- `lib/main.dart` – app entry point and Firebase bootstrap.
-- `lib/core/firebase/firebase_bootstrap.dart` – Firebase initialization (web + mobile).
-- `lib/core/firebase/firestore_data_service.dart` – Firestore read/write helpers.
-- `lib/models` – data models used across the app.
-- `lib/modules/auth` – unified login screen and registration flows.
-- `lib/modules/doctor` – doctor dashboard, appointment list, call initiation.
-- `lib/modules/patient` – patient home, appointment list, join call UI, feedback.
-- `lib/modules/video_call` – video call screen using ZEGOCLOUD.
-
----
-
-## 🚀 How to Run (Local)
-
-1. **Install Flutter**
-
-```bash
-flutter --version
-```
-
-2. **Configure Firebase**
-
-This project relies on Firestore and requires Firebase initialization for web and mobile.
-
-```bash
-dart pub global activate flutterfire_cli
-flutterfire configure
-```
-
-The `flutterfire configure` command generates `lib/firebase_options.dart`.
-
-3. **Install dependencies**
+1. Install dependencies:
 
 ```bash
 flutter pub get
 ```
 
-4. **Run**
+2. Verify Flutter setup:
 
 ```bash
-flutter run -d chrome
+flutter doctor
 ```
 
-Or on a connected mobile device:
+3. Run the app:
 
 ```bash
 flutter run
 ```
 
----
+4. Run on Chrome if needed:
 
-## 🛠 Development Notes
+```bash
+flutter run -d chrome
+```
 
-- If Firebase init fails on web, ensure `lib/firebase_options.dart` contains valid project settings.
-- If Firestore reads/writes fail, verify Firestore is enabled in the Firebase console and rules allow access.
+## Firebase Notes
 
----
+This project includes Firebase configuration files in the repo:
 
-## 🧪 Useful Tips
+- `android/app/google-services.json`
+- `ios/Runner/GoogleService-Info.plist`
+- `lib/firebase_options.dart`
 
-- To quickly test a doctor login, use the in-app doctor registration and then login as the created doctor.
-- App state is kept in `AppState` and synced from Firestore on startup.
-- Video call room names are stored on the appointment document so doctor/patient stay in sync.
-  gi
+If you change the Firebase project, regenerate or replace these files with your own project configuration.
+
+## Build APK Locally
+
+To generate a release APK on your machine:
+
+```bash
+flutter build apk --release
+```
+
+The APK will be created at:
+
+```text
+build/app/outputs/flutter-apk/app-release.apk
+```
+
+## Download APK From GitHub
+
+This repository includes a GitHub Actions workflow that builds the Android APK automatically.
+
+### Option 1: Download from GitHub Actions
+
+1. Open the repository on GitHub.
+2. Go to the `Actions` tab.
+3. Open the latest `Build Android APK` workflow run.
+4. Download the `godoc-apk` artifact.
+
+This is the easiest option for team members who just need the latest build.
+
+### Option 2: Download from GitHub Releases
+
+When a version tag such as `v1.0.0` is pushed, the workflow also creates a GitHub Release and uploads the APK there.
+
+Example:
+
+```bash
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+After the workflow completes, teammates can open the repository `Releases` page and download the APK directly.
+
+## Development Notes
+
+- Android release builds are currently signed with the debug signing config in Gradle.
+- Firestore is used for app data and custom credential storage.
+- Video call state is synchronized through Firestore appointment documents.
+
+## Useful Commands
+
+```bash
+flutter pub get
+flutter analyze
+flutter test
+flutter build apk --release
+```
