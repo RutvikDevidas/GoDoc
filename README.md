@@ -4,7 +4,7 @@ GoDoc is a Flutter telemedicine app built for doctor and patient workflows. It s
 
 ## The Team
 
-We are a team of six
+We are a team of Five
 
 [![Rutvik](https://img.shields.io/badge/Github-RutvikDevidas-blue.svg)](https://github.com/RutvikDevidas)
 
