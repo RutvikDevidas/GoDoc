@@ -37,7 +37,11 @@ class ClinicLocationPickerScreen extends StatefulWidget {
 
 class _ClinicLocationPickerScreenState
     extends State<ClinicLocationPickerScreen> {
-  static const latlng.LatLng _defaultCenter = latlng.LatLng(28.6139, 77.2090);
+  static const latlng.LatLng _defaultCenter = latlng.LatLng(15.4909, 73.8278);
+  static final LatLngBounds _goaBounds = LatLngBounds(
+    const latlng.LatLng(14.85, 73.68),
+    const latlng.LatLng(15.83, 74.35),
+  );
 
   final MapController _mapController = MapController();
 
@@ -50,17 +54,37 @@ class _ClinicLocationPickerScreenState
   void initState() {
     super.initState();
     if (widget.initialLatitude != null && widget.initialLongitude != null) {
-      _selectedLocation = latlng.LatLng(
+      final initialLocation = latlng.LatLng(
         widget.initialLatitude!,
         widget.initialLongitude!,
       );
+      if (_isWithinGoa(initialLocation)) {
+        _selectedLocation = initialLocation;
+      }
     }
     _selectedAddress = widget.initialAddress?.trim();
   }
 
   latlng.LatLng get _initialCameraTarget => _selectedLocation ?? _defaultCenter;
 
+  bool _isWithinGoa(latlng.LatLng location) {
+    return _goaBounds.contains(location);
+  }
+
+  void _showGoaOnlyMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Please choose a clinic location within Goa only.'),
+      ),
+    );
+  }
+
   Future<void> _setSelectedLocation(latlng.LatLng location) async {
+    if (!_isWithinGoa(location)) {
+      _showGoaOnlyMessage();
+      return;
+    }
+
     setState(() {
       _selectedLocation = location;
       _saving = true;
@@ -89,10 +113,11 @@ class _ClinicLocationPickerScreenState
         _selectedAddress = fallbackAddress;
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _saving = false;
-      });
+      if (mounted) {
+        setState(() {
+          _saving = false;
+        });
+      }
     }
   }
 
@@ -134,6 +159,10 @@ class _ClinicLocationPickerScreenState
     try {
       final position = await _determinePosition();
       final location = latlng.LatLng(position.latitude, position.longitude);
+      if (!_isWithinGoa(location)) {
+        _showGoaOnlyMessage();
+        return;
+      }
 
       await _setSelectedLocation(location);
 
@@ -143,14 +172,15 @@ class _ClinicLocationPickerScreenState
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.toString())),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _loadingCurrentLocation = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loadingCurrentLocation = false;
+        });
+      }
     }
   }
 
@@ -184,7 +214,9 @@ class _ClinicLocationPickerScreenState
     final trimmedAddress = _selectedAddress?.trim();
     if (selectedLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Tap the map to choose a clinic location.')),
+        const SnackBar(
+          content: Text('Tap the map to choose a clinic location.'),
+        ),
       );
       return;
     }
@@ -194,13 +226,12 @@ class _ClinicLocationPickerScreenState
       ClinicLocationResult(
         latitude: selectedLocation.latitude,
         longitude: selectedLocation.longitude,
-        address:
-            (trimmedAddress != null && trimmedAddress.isNotEmpty)
-                ? trimmedAddress
-                : _formatCoordinates(
-                    selectedLocation.latitude,
-                    selectedLocation.longitude,
-                  ),
+        address: (trimmedAddress != null && trimmedAddress.isNotEmpty)
+            ? trimmedAddress
+            : _formatCoordinates(
+                selectedLocation.latitude,
+                selectedLocation.longitude,
+              ),
       ),
     );
   }
@@ -213,11 +244,9 @@ class _ClinicLocationPickerScreenState
           _initialCameraTarget.latitude,
           _initialCameraTarget.longitude,
         ),
-        initialZoom: selectedLocation == null ? 11 : 16,
+        initialZoom: selectedLocation == null ? 10 : 16,
         onTap: (_, point) {
-          _setSelectedLocation(
-            latlng.LatLng(point.latitude, point.longitude),
-          );
+          _setSelectedLocation(latlng.LatLng(point.latitude, point.longitude));
         },
       ),
       children: [
@@ -263,9 +292,7 @@ class _ClinicLocationPickerScreenState
       ),
       body: Column(
         children: [
-          Expanded(
-            child: _buildMap(selectedLocation),
-          ),
+          Expanded(child: _buildMap(selectedLocation)),
           SafeArea(
             top: false,
             child: Container(
@@ -286,7 +313,7 @@ class _ClinicLocationPickerScreenState
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   const Text(
-                    'Tap anywhere on the map to pin the clinic.',
+                    'Select Your Clinic Location',
                     style: TextStyle(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 8),
@@ -294,11 +321,10 @@ class _ClinicLocationPickerScreenState
                     selectedLocation == null
                         ? 'No location selected yet.'
                         : _selectedAddress ??
-                            _formatCoordinates(
-                              selectedLocation.latitude,
-                              selectedLocation.longitude,
-                            ),
-                  ),
+                              _formatCoordinates(
+                                selectedLocation.latitude,
+                                selectedLocation.longitude,
+                              ),
                   if (selectedLocation != null) ...[
                     const SizedBox(height: 6),
                     Text(

@@ -28,9 +28,6 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
   late final TextEditingController address;
   late final TextEditingController email;
   late final TextEditingController phone;
-  final TextEditingController reportController = TextEditingController();
-  String? pendingReportAttachmentData;
-  String? pendingReportAttachmentName;
 
   @override
   void initState() {
@@ -51,7 +48,6 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
     address.dispose();
     email.dispose();
     phone.dispose();
-    reportController.dispose();
     super.dispose();
   }
 
@@ -94,35 +90,6 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
     });
   }
 
-  Future<void> _pickReportAttachment() async {
-    final file = await _imagePicker.pickImage(source: ImageSource.gallery);
-    if (file == null) return;
-
-    final bytes = await file.readAsBytes();
-    setState(() {
-      pendingReportAttachmentData = base64Encode(bytes);
-      pendingReportAttachmentName = file.name;
-    });
-  }
-
-  void _addReport() {
-    final report = reportController.text.trim();
-    if (report.isEmpty) return;
-
-    setState(() {
-      widget.patient.medicalReports.add(
-        MedicalReport(
-          title: report,
-          attachmentData: pendingReportAttachmentData,
-          attachmentName: pendingReportAttachmentName,
-        ),
-      );
-      reportController.clear();
-      pendingReportAttachmentData = null;
-      pendingReportAttachmentName = null;
-    });
-  }
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -130,10 +97,7 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
       appBar: AppBar(
         title: const Text("Edit Profile"),
         actions: [
-          TextButton(
-            onPressed: _saveProfile,
-            child: const Text("Save"),
-          ),
+          TextButton(onPressed: _saveProfile, child: const Text("Save")),
         ],
       ),
       body: SingleChildScrollView(
@@ -213,97 +177,21 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: reportController,
-                        decoration: const InputDecoration(
-                          labelText: "Add report name",
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 96,
-                      child: OutlinedButton(
-                        onPressed: _pickReportAttachment,
-                        child: const Text("Photo"),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 88,
-                      child: ElevatedButton(
-                        onPressed: _addReport,
-                        child: const Text("Add"),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                if (pendingReportAttachmentName != null)
-                  Container(
-                    width: double.infinity,
-                    margin: const EdgeInsets.only(bottom: 14),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.accent,
-                      borderRadius: BorderRadius.circular(18),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.image_outlined,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            pendingReportAttachmentName!,
-                            style: const TextStyle(
-                              color: AppColors.darkText,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        IconButton(
-                          onPressed: () {
-                            setState(() {
-                              pendingReportAttachmentData = null;
-                              pendingReportAttachmentName = null;
-                            });
-                          },
-                          icon: const Icon(Icons.close_rounded),
-                        ),
-                      ],
-                    ),
-                  ),
                 if (widget.patient.medicalReports.isEmpty)
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      "No reports added yet.",
+                      "No reports have been uploaded by a doctor yet.",
                       style: TextStyle(color: AppColors.mutedText),
                     ),
                   )
                 else
                   Column(
                     children: widget.patient.medicalReports
-                        .asMap()
-                        .entries
                         .map(
-                          (entry) => Padding(
+                          (report) => Padding(
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: _EditableReportCard(
-                              report: entry.value,
-                              onDelete: () {
-                                setState(() {
-                                  widget.patient.medicalReports.removeAt(entry.key);
-                                });
-                              },
-                            ),
+                            child: _ReadOnlyReportCard(report: report),
                           ),
                         )
                         .toList(),
@@ -347,7 +235,9 @@ class _PatientEditProfileScreenState extends State<PatientEditProfileScreen> {
         decoration: InputDecoration(
           labelText: label,
           helperText: helperText,
-          suffixIcon: readOnly ? const Icon(Icons.calendar_today_rounded) : null,
+          suffixIcon: readOnly
+              ? const Icon(Icons.calendar_today_rounded)
+              : null,
         ),
       ),
     );
@@ -372,24 +262,16 @@ class _PatientAvatar extends StatelessWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: imageBytes == null
-          ? const Icon(
-              Icons.person_rounded,
-              color: AppColors.primary,
-              size: 34,
-            )
+          ? const Icon(Icons.person_rounded, color: AppColors.primary, size: 34)
           : Image.memory(imageBytes, fit: BoxFit.cover),
     );
   }
 }
 
-class _EditableReportCard extends StatelessWidget {
+class _ReadOnlyReportCard extends StatelessWidget {
   final MedicalReport report;
-  final VoidCallback onDelete;
 
-  const _EditableReportCard({
-    required this.report,
-    required this.onDelete,
-  });
+  const _ReadOnlyReportCard({required this.report});
 
   @override
   Widget build(BuildContext context) {
@@ -410,10 +292,7 @@ class _EditableReportCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.description_outlined,
-                color: AppColors.primary,
-              ),
+              const Icon(Icons.description_outlined, color: AppColors.primary),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -424,9 +303,9 @@ class _EditableReportCard extends StatelessWidget {
                   ),
                 ),
               ),
-              IconButton(
-                onPressed: onDelete,
-                icon: const Icon(Icons.delete_outline_rounded),
+              const Icon(
+                Icons.lock_outline_rounded,
+                color: AppColors.mutedText,
               ),
             ],
           ),

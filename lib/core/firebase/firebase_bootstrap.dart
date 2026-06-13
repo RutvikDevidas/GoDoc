@@ -37,9 +37,9 @@ Future<void> bootstrapFirebase() async {
 
     try {
       // Avoid blocking startup if the first Firestore sync is slow.
-      await FirestoreDataService.instance
-          .seedAndSync()
-          .timeout(const Duration(seconds: 10));
+      await FirestoreDataService.instance.seedAndSync().timeout(
+        const Duration(seconds: 10),
+      );
     } catch (error) {
       firebaseUnavailableReason = 'Initial Firestore sync skipped: $error';
       debugPrint('Firestore sync failed: $error');

@@ -70,17 +70,23 @@ class _BookingScreenState extends State<BookingScreen> {
   }
 
   List<DoctorAvailability> get _availableDates {
-    final dates = widget.doctor.availability
-        .where((slot) => _availableTimesFor(slot).isNotEmpty)
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
+    final dates =
+        widget.doctor.availability
+            .where((slot) => _availableTimesFor(slot).isNotEmpty)
+            .toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
     return dates;
   }
 
   List<String> _availableTimesFor(DoctorAvailability availability) {
     final bookedTimes = AppState.appointments
-        .where((appointment) => appointment.doctorUsername == widget.doctor.username)
-        .where((appointment) => appointment.date == _formatAppointmentDate(availability.date))
+        .where(
+          (appointment) => appointment.doctorUsername == widget.doctor.username,
+        )
+        .where(
+          (appointment) =>
+              appointment.date == _formatAppointmentDate(availability.date),
+        )
         .where((appointment) => appointment.status != "rejected")
         .map((appointment) => appointment.time)
         .toSet();
@@ -125,8 +131,7 @@ class _BookingScreenState extends State<BookingScreen> {
     DateTime? paymentPaidAt,
   }) {
     return AppointmentModel(
-      id:
-          "appt-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(900) + 100}",
+      id: "appt-${DateTime.now().millisecondsSinceEpoch}-${Random().nextInt(900) + 100}",
       doctorUsername: widget.doctor.username,
       patientUsername: widget.patient.username,
       date: _formatAppointmentDate(selectedAvailability!.date),
@@ -245,9 +250,7 @@ class _BookingScreenState extends State<BookingScreen> {
         'appointment_type': type,
         'receipt': receipt,
       },
-      'theme': {
-        'color': '#0F766E',
-      },
+      'theme': {'color': '#0F766E'},
     };
 
     try {
@@ -312,6 +315,7 @@ class _BookingScreenState extends State<BookingScreen> {
         paymentPaidAt: paymentPaidAt,
       );
 
+      if (!mounted) return;
       if (!_hasRequiredPayment(appointment)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -506,7 +510,8 @@ class _BookingScreenState extends State<BookingScreen> {
                   const SizedBox(height: 12),
                   _TypeTile(
                     title: "Online consultation",
-                    subtitle: "Payment is compulsory before the booking is created.",
+                    subtitle:
+                        "Payment is compulsory before the booking is created.",
                     icon: Icons.videocam_outlined,
                     isSelected: type == "Online",
                     onTap: () => setState(() => type = "Online"),
@@ -622,7 +627,7 @@ class _DateChoice extends StatelessWidget {
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: AppColors.primary.withOpacity(0.22),
+                    color: AppColors.primary.withValues(alpha: 0.22),
                     blurRadius: 16,
                     offset: const Offset(0, 8),
                   ),
@@ -753,7 +758,7 @@ class _SummaryBadge extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.14),
+          color: Colors.white.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
@@ -806,20 +811,15 @@ class _PaymentResult {
   final String? orderId;
   final String? signature;
 
-  const _PaymentResult({
-    this.paymentId,
-    this.orderId,
-    this.signature,
-  });
+  const _PaymentResult({this.paymentId, this.orderId, this.signature});
 
-  String get reference =>
-      paymentId?.trim().isNotEmpty == true
-          ? paymentId!.trim()
-          : orderId?.trim().isNotEmpty == true
-          ? orderId!.trim()
-          : signature?.trim().isNotEmpty == true
-          ? signature!.trim()
-          : 'razorpay-${DateTime.now().millisecondsSinceEpoch}';
+  String get reference => paymentId?.trim().isNotEmpty == true
+      ? paymentId!.trim()
+      : orderId?.trim().isNotEmpty == true
+      ? orderId!.trim()
+      : signature?.trim().isNotEmpty == true
+      ? signature!.trim()
+      : 'razorpay-${DateTime.now().millisecondsSinceEpoch}';
 }
 
 class _PaymentDetailsCard extends StatelessWidget {
@@ -866,14 +866,10 @@ class _PaymentDetailsCard extends StatelessWidget {
             )
           else
             const SizedBox.shrink(),
-          if (RazorpayConfig.isConfigured)
-            const SizedBox(height: 10),
+          if (RazorpayConfig.isConfigured) const SizedBox(height: 10),
           const Text(
             "Payment is compulsory for online consultations. The booking is created only after Razorpay reports the payment as successful.",
-            style: TextStyle(
-              color: AppColors.mutedText,
-              height: 1.5,
-            ),
+            style: TextStyle(color: AppColors.mutedText, height: 1.5),
           ),
         ],
       ),

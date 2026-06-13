@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'dart:convert';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/session/session_manager.dart';
+import '../../core/widgets/top_snackbar.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
@@ -21,11 +25,26 @@ class _AdminDashboardState extends State<AdminDashboard> {
   bool _isSyncing = false;
   bool _isSavingDoctorReview = false;
   bool _isDeletingRecord = false;
+  StreamSubscription<List<DoctorModel>>? _doctorSubscription;
+  StreamSubscription<List<AppointmentModel>>? _appointmentSubscription;
+  final Map<String, String> _knownDoctorReviewStates = {};
+  final Map<String, String> _knownAppointmentStates = {};
+  bool _hasHydratedDoctors = false;
+  bool _hasHydratedAppointments = false;
 
   @override
   void initState() {
     super.initState();
     _syncAdminData();
+    _subscribeToDoctorUpdates();
+    _subscribeToAppointmentUpdates();
+  }
+
+  @override
+  void dispose() {
+    _doctorSubscription?.cancel();
+    _appointmentSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _syncAdminData() async {
@@ -35,7 +54,19 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
     try {
       await FirestoreDataService.instance.syncAllToAppState();
-    } catch (_) {
+    } catch (e) {
+      // Log the error for debugging
+      print('❌ ADMIN DATA SYNC ERROR: $e');
+      print('Stack: ${StackTrace.current}');
+
+      // Show error message to admin
+      if (mounted) {
+        _pushAdminNotification(
+          'Failed to load admin data: ${e.toString()}',
+          variant: TopSnackbarVariant.error,
+        );
+      }
+
       // Keep the dashboard usable even if Firebase is unavailable.
     }
 
@@ -43,6 +74,107 @@ class _AdminDashboardState extends State<AdminDashboard> {
     setState(() {
       _isSyncing = false;
     });
+  }
+
+  void _subscribeToDoctorUpdates() {
+    _doctorSubscription = FirestoreDataService.instance.watchDoctors().listen((
+      doctors,
+    ) {
+      for (final doctor in doctors) {
+        final reviewState = doctor.verified
+            ? 'verified'
+            : doctor.rejected
+            ? 'rejected'
+            : 'pending';
+        final previousState = _knownDoctorReviewStates[doctor.username];
+
+        if (_hasHydratedDoctors && previousState == null) {
+          _pushAdminNotification(
+            'New doctor registration from ${doctor.name}.',
+            variant: TopSnackbarVariant.info,
+          );
+        } else if (previousState != null && previousState != reviewState) {
+          final message = switch (reviewState) {
+            'verified' => '${doctor.name} has been approved.',
+            'rejected' => '${doctor.name} has been rejected.',
+            _ => '${doctor.name} is back in pending review.',
+          };
+          _pushAdminNotification(message, variant: TopSnackbarVariant.info);
+        }
+
+        _knownDoctorReviewStates[doctor.username] = reviewState;
+      }
+
+      AppState.doctors = doctors;
+      _hasHydratedDoctors = true;
+
+      if (mounted) {
+        setState(() {});
+      }
+    });
+  }
+
+  void _subscribeToAppointmentUpdates() {
+    _appointmentSubscription = FirestoreDataService.instance
+        .watchAppointments()
+        .listen((appointments) {
+          for (final appointment in appointments) {
+            final previousState = _knownAppointmentStates[appointment.id];
+            final currentState =
+                '${appointment.status}|${appointment.feedbackSubmitted}|${appointment.paymentStatus}';
+
+            if (_hasHydratedAppointments && previousState == null) {
+              _pushAdminNotification(
+                'New appointment booked for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+                variant: TopSnackbarVariant.success,
+              );
+            } else if (previousState != null && previousState != currentState) {
+              final message = _adminAppointmentMessage(appointment);
+              _pushAdminNotification(message, variant: TopSnackbarVariant.info);
+            }
+
+            _knownAppointmentStates[appointment.id] = currentState;
+          }
+
+          FirestoreDataService.instance.mergeAppointmentsIntoAppState(
+            appointments,
+          );
+          _hasHydratedAppointments = true;
+
+          if (mounted) {
+            setState(() {});
+          }
+        });
+  }
+
+  String _adminAppointmentMessage(AppointmentModel appointment) {
+    if (appointment.feedbackSubmitted) {
+      return '${appointment.patientUsername} submitted feedback for ${appointment.doctorUsername}.';
+    }
+
+    return switch (appointment.status) {
+      'confirmed' =>
+        'Appointment confirmed for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+      'rescheduled' =>
+        'Appointment rescheduled for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+      'completed' =>
+        'Appointment completed for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+      'rejected' =>
+        'Appointment rejected for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+      'cancelled' =>
+        'Appointment cancelled for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+      _ =>
+        'Appointment updated for ${appointment.patientUsername} with ${appointment.doctorUsername}.',
+    };
+  }
+
+  void _pushAdminNotification(
+    String message, {
+    required TopSnackbarVariant variant,
+  }) {
+    AppState.adminNotifications.add(message);
+    if (!mounted) return;
+    TopSnackbar.show(context, message: message, variant: variant);
   }
 
   Future<void> _updateDoctorStatus(
@@ -79,23 +211,36 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text("Cancel"),
+        return CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                Navigator.pop(context, false),
+            const SingleActivator(LogicalKeyboardKey.enter): () =>
+                Navigator.pop(context, true),
+            const SingleActivator(LogicalKeyboardKey.numpadEnter): () =>
+                Navigator.pop(context, true),
+          },
+          child: Focus(
+            autofocus: true,
+            child: AlertDialog(
+              title: Text(title),
+              content: Text(message),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text("Cancel"),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text("Delete"),
+                ),
+              ],
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.danger,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text("Delete"),
-            ),
-          ],
+          ),
         );
       },
     );
@@ -119,10 +264,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       await FirestoreDataService.instance.deleteDoctor(doctor.username);
       await FirestoreDataService.instance.syncAllToAppState();
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isDeletingRecord = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isDeletingRecord = false;
+        });
+      }
     }
   }
 
@@ -142,10 +288,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
       await FirestoreDataService.instance.deletePatient(patient.username);
       await FirestoreDataService.instance.syncAllToAppState();
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isDeletingRecord = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isDeletingRecord = false;
+        });
+      }
     }
   }
 
@@ -165,11 +312,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
       await FirestoreDataService.instance.deleteAppointment(appointment.id);
       await FirestoreDataService.instance.syncAllToAppState();
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _isDeletingRecord = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isDeletingRecord = false;
+        });
+      }
     }
+  }
+
+  void _openDoctorProfile(DoctorModel doctor) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _AdminDoctorProfileScreen(doctor: doctor),
+      ),
+    );
+  }
+
+  void _openPatientProfile(PatientModel patient) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => _AdminPatientProfileScreen(patient: patient),
+      ),
+    );
   }
 
   @override
@@ -182,7 +348,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     ];
 
     return Scaffold(
-      extendBody: true,
       appBar: AppBar(
         toolbarHeight: 78,
         title: Column(
@@ -219,7 +384,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           IconButton(
             icon: const Icon(Icons.logout_rounded),
             tooltip: "Logout",
-            onPressed: () {
+            onPressed: () async {
+              await SessionManager.clearSession();
+              if (!context.mounted) return;
               Navigator.pushAndRemoveUntil(
                 context,
                 MaterialPageRoute(builder: (_) => const UnifiedLoginScreen()),
@@ -374,10 +541,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           _PriorityCard(
             icon: Icons.verified_user_rounded,
             title: "Doctor verification",
-            subtitle:
-                pendingDoctors == 0
-                    ? "All doctor applications are currently reviewed."
-                    : "$pendingDoctors doctor application(s) are waiting for approval.",
+            subtitle: pendingDoctors == 0
+                ? "All doctor applications are currently reviewed."
+                : "$pendingDoctors doctor application(s) are waiting for approval.",
           ),
           const SizedBox(height: 14),
           _PriorityCard(
@@ -396,10 +562,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final pendingDoctors = doctors
         .where((doctor) => !doctor.verified && !doctor.rejected)
         .toList();
-    final verifiedDoctors =
-        doctors.where((doctor) => doctor.verified).toList();
-    final rejectedDoctors =
-        doctors.where((doctor) => doctor.rejected).toList();
+    final verifiedDoctors = doctors.where((doctor) => doctor.verified).toList();
+    final rejectedDoctors = doctors.where((doctor) => doctor.rejected).toList();
 
     if (doctors.isEmpty) {
       return const _EmptyState(message: "No doctors registered yet.");
@@ -420,6 +584,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: _DoctorReviewCard(
                     doctor: doctor,
                     reviewLocked: _isSavingDoctorReview || _isDeletingRecord,
+                    onViewProfile: () => _openDoctorProfile(doctor),
                     onVerify: () => _updateDoctorStatus(
                       doctor,
                       verified: true,
@@ -449,6 +614,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: _DoctorReviewCard(
                     doctor: doctor,
                     reviewLocked: _isSavingDoctorReview || _isDeletingRecord,
+                    onViewProfile: () => _openDoctorProfile(doctor),
                     onVerify: () async {},
                     onReject: () => _updateDoctorStatus(
                       doctor,
@@ -474,6 +640,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
                   child: _DoctorReviewCard(
                     doctor: doctor,
                     reviewLocked: _isSavingDoctorReview || _isDeletingRecord,
+                    onViewProfile: () => _openDoctorProfile(doctor),
                     onVerify: () => _updateDoctorStatus(
                       doctor,
                       verified: true,
@@ -494,7 +661,30 @@ class _AdminDashboardState extends State<AdminDashboard> {
     final patients = AppState.patients;
 
     if (patients.isEmpty) {
-      return const _EmptyState(message: "No patients found.");
+      return SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 110),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(height: 40),
+            const _EmptyState(
+              message:
+                  "No patients found.\n\n"
+                  "This could mean:\n"
+                  "• No patients have registered yet\n"
+                  "• Patient data failed to load\n"
+                  "• Firestore permissions issue\n\n"
+                  "Tap the refresh button (top right) to try loading again.",
+            ),
+            const SizedBox(height: 32),
+            ElevatedButton.icon(
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Refresh Data'),
+              onPressed: _syncAdminData,
+            ),
+          ],
+        ),
+      );
     }
 
     return ListView.builder(
@@ -508,6 +698,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           child: _PatientDirectoryCard(
             patient: patient,
             deleteLocked: _isDeletingRecord,
+            onViewProfile: () => _openPatientProfile(patient),
             onDelete: () => _deletePatient(patient),
           ),
         );
@@ -662,7 +853,7 @@ class _AdminHeroCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(30),
         boxShadow: [
           BoxShadow(
-            color: AppColors.primary.withOpacity(0.2),
+            color: AppColors.primary.withValues(alpha: 0.2),
             blurRadius: 28,
             offset: const Offset(0, 16),
           ),
@@ -674,7 +865,7 @@ class _AdminHeroCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.12),
+              color: Colors.white.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(18),
             ),
             child: const Text(
@@ -742,7 +933,7 @@ class _HeroChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -810,7 +1001,7 @@ class _MetricCard extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.14),
+              color: color.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(icon, color: color),
@@ -833,10 +1024,7 @@ class _MetricCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: const TextStyle(color: AppColors.mutedText),
-          ),
+          Text(subtitle, style: const TextStyle(color: AppColors.mutedText)),
         ],
       ),
     );
@@ -908,6 +1096,7 @@ class _PriorityCard extends StatelessWidget {
 class _DoctorReviewCard extends StatelessWidget {
   final DoctorModel doctor;
   final bool reviewLocked;
+  final VoidCallback onViewProfile;
   final Future<void> Function() onVerify;
   final Future<void> Function() onReject;
   final Future<void> Function() onDelete;
@@ -915,6 +1104,7 @@ class _DoctorReviewCard extends StatelessWidget {
   const _DoctorReviewCard({
     required this.doctor,
     required this.reviewLocked,
+    required this.onViewProfile,
     required this.onVerify,
     required this.onReject,
     required this.onDelete,
@@ -925,175 +1115,202 @@ class _DoctorReviewCard extends StatelessWidget {
     final statusLabel = doctor.verified
         ? "Verified"
         : doctor.rejected
-            ? "Rejected"
-            : "Pending review";
+        ? "Rejected"
+        : "Pending review";
     final statusColor = doctor.verified
         ? AppColors.success
         : doctor.rejected
-            ? AppColors.danger
-            : AppColors.warning;
+        ? AppColors.danger
+        : AppColors.warning;
     final imageBytes = doctor.profileImageData == null
         ? null
         : base64Decode(doctor.profileImageData!);
 
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: Colors.white,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onViewProfile,
         borderRadius: BorderRadius.circular(26),
-        border: Border.all(color: AppColors.border),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x0D0F172A),
-            blurRadius: 16,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 16,
-            runSpacing: 12,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: imageBytes == null
-                    ? const Icon(
-                        Icons.local_hospital_rounded,
-                        color: AppColors.primary,
-                        size: 30,
-                      )
-                    : Image.memory(imageBytes, fit: BoxFit.cover),
-              ),
-              SizedBox(
-                width: 220,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      doctor.name,
-                      style: const TextStyle(
-                        color: AppColors.darkText,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      doctor.specialization,
-                      style: const TextStyle(
-                        color: AppColors.mutedText,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.14),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text(
-                  statusLabel,
-                  style: TextStyle(
-                    color: statusColor,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 12,
-                  ),
-                ),
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: AppColors.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0D0F172A),
+                blurRadius: 16,
+                offset: Offset(0, 10),
               ),
             ],
           ),
-          const SizedBox(height: 18),
-          _DetailRow(label: "Username", value: doctor.username),
-          _DetailRow(label: "Clinic", value: doctor.clinicName),
-          _DetailRow(label: "Phone", value: doctor.phone),
-          _DetailRow(label: "PR / NMC", value: "${doctor.prNumber} / ${doctor.nmcNumber}"),
-          _DetailRow(label: "Licence", value: doctor.licenceNumber),
-          if (!doctor.verified && !doctor.rejected) ...[
-            const SizedBox(height: 18),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final compact = constraints.maxWidth < 360;
-
-                if (compact) {
-                  return Column(
-                    children: [
-                      ElevatedButton(
-                        onPressed: reviewLocked ? null : () async => onVerify(),
-                        child: const Text("Verify"),
-                      ),
-                      const SizedBox(height: 12),
-                      OutlinedButton(
-                        onPressed: reviewLocked ? null : () async => onReject(),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.danger,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 16,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: AppColors.accent,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: imageBytes == null
+                        ? const Icon(
+                            Icons.local_hospital_rounded,
+                            color: AppColors.primary,
+                            size: 30,
+                          )
+                        : Image.memory(imageBytes, fit: BoxFit.cover),
+                  ),
+                  SizedBox(
+                    width: 220,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          doctor.name,
+                          style: const TextStyle(
+                            color: AppColors.darkText,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
                         ),
-                        child: const Text("Reject"),
-                      ),
-                    ],
-                  );
-                }
-
-                return Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: reviewLocked ? null : () async => onVerify(),
-                        child: const Text("Verify"),
+                        const SizedBox(height: 4),
+                        Text(
+                          doctor.specialization,
+                          style: const TextStyle(
+                            color: AppColors.mutedText,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: TextStyle(
+                        color: statusColor,
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12,
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: reviewLocked ? null : () async => onReject(),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: AppColors.danger,
-                        ),
-                        child: const Text("Reject"),
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ] else if (doctor.verified) ...[
-            const SizedBox(height: 18),
-            OutlinedButton(
-              onPressed: reviewLocked ? null : () async => onReject(),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.danger,
+                  ),
+                ],
               ),
-              child: const Text("Move to rejected"),
-            ),
-          ] else if (doctor.rejected) ...[
-            const SizedBox(height: 18),
-            ElevatedButton(
-              onPressed: reviewLocked ? null : () async => onVerify(),
-              child: const Text("Approve now"),
-            ),
-          ],
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: reviewLocked ? null : () async => onDelete(),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.danger,
-            ),
-            icon: const Icon(Icons.delete_outline_rounded),
-            label: const Text("Delete doctor"),
+              const SizedBox(height: 18),
+              _DetailRow(label: "Username", value: doctor.username),
+              _DetailRow(label: "Clinic", value: doctor.clinicName),
+              _DetailRow(label: "Phone", value: doctor.phone),
+              _DetailRow(
+                label: "PR / NMC",
+                value: "${doctor.prNumber} / ${doctor.nmcNumber}",
+              ),
+              _DetailRow(label: "Licence", value: doctor.licenceNumber),
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: onViewProfile,
+                icon: const Icon(Icons.person_outline_rounded),
+                label: const Text("View profile"),
+              ),
+              if (!doctor.verified && !doctor.rejected) ...[
+                const SizedBox(height: 18),
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 360;
+
+                    if (compact) {
+                      return Column(
+                        children: [
+                          ElevatedButton(
+                            onPressed: reviewLocked
+                                ? null
+                                : () async => onVerify(),
+                            child: const Text("Verify"),
+                          ),
+                          const SizedBox(height: 12),
+                          OutlinedButton(
+                            onPressed: reviewLocked
+                                ? null
+                                : () async => onReject(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.danger,
+                            ),
+                            child: const Text("Reject"),
+                          ),
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: reviewLocked
+                                ? null
+                                : () async => onVerify(),
+                            child: const Text("Verify"),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: OutlinedButton(
+                            onPressed: reviewLocked
+                                ? null
+                                : () async => onReject(),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: AppColors.danger,
+                            ),
+                            child: const Text("Reject"),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ] else if (doctor.verified) ...[
+                const SizedBox(height: 18),
+                OutlinedButton(
+                  onPressed: reviewLocked ? null : () async => onReject(),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.danger,
+                  ),
+                  child: const Text("Move to rejected"),
+                ),
+              ] else if (doctor.rejected) ...[
+                const SizedBox(height: 18),
+                ElevatedButton(
+                  onPressed: reviewLocked ? null : () async => onVerify(),
+                  child: const Text("Approve now"),
+                ),
+              ],
+              const SizedBox(height: 12),
+              OutlinedButton.icon(
+                onPressed: reviewLocked ? null : () async => onDelete(),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.danger,
+                ),
+                icon: const Icon(Icons.delete_outline_rounded),
+                label: const Text("Delete doctor"),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -1119,7 +1336,7 @@ class _DoctorSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.72),
+        color: Colors.white.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(28),
         border: Border.all(color: AppColors.border),
       ),
@@ -1149,8 +1366,10 @@ class _DoctorSection extends StatelessWidget {
                 ),
               ),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.accent,
                   borderRadius: BorderRadius.circular(18),
@@ -1169,10 +1388,7 @@ class _DoctorSection extends StatelessWidget {
           if (children.isEmpty)
             Text(
               emptyMessage,
-              style: const TextStyle(
-                color: AppColors.mutedText,
-                height: 1.5,
-              ),
+              style: const TextStyle(color: AppColors.mutedText, height: 1.5),
             )
           else
             ...children,
@@ -1185,11 +1401,13 @@ class _DoctorSection extends StatelessWidget {
 class _PatientDirectoryCard extends StatelessWidget {
   final PatientModel patient;
   final bool deleteLocked;
+  final VoidCallback onViewProfile;
   final Future<void> Function() onDelete;
 
   const _PatientDirectoryCard({
     required this.patient,
     required this.deleteLocked,
+    required this.onViewProfile,
     required this.onDelete,
   });
 
@@ -1199,8 +1417,398 @@ class _PatientDirectoryCard extends StatelessWidget {
         ? null
         : base64Decode(patient.profileImageData!);
 
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onViewProfile,
+        borderRadius: BorderRadius.circular(26),
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: AppColors.border),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0D0F172A),
+                blurRadius: 16,
+                offset: Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 58,
+                    height: 58,
+                    decoration: BoxDecoration(
+                      color: AppColors.accent,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: imageBytes == null
+                        ? Center(
+                            child: Text(
+                              patient.name.isNotEmpty
+                                  ? patient.name[0].toUpperCase()
+                                  : "P",
+                              style: const TextStyle(
+                                color: AppColors.primary,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 22,
+                              ),
+                            ),
+                          )
+                        : Image.memory(imageBytes, fit: BoxFit.cover),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          patient.name,
+                          style: const TextStyle(
+                            color: AppColors.darkText,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          patient.email,
+                          style: const TextStyle(color: AppColors.mutedText),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          patient.phone,
+                          style: const TextStyle(color: AppColors.mutedText),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.accent,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Text(
+                      "${patient.medicalReports.length} reports",
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  OutlinedButton.icon(
+                    onPressed: onViewProfile,
+                    icon: const Icon(Icons.person_outline_rounded),
+                    label: const Text("View profile"),
+                  ),
+                  const SizedBox(width: 12),
+                  OutlinedButton.icon(
+                    onPressed: deleteLocked ? null : () async => onDelete(),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.danger,
+                    ),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    label: const Text("Delete patient"),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminDoctorProfileScreen extends StatelessWidget {
+  final DoctorModel doctor;
+
+  const _AdminDoctorProfileScreen({required this.doctor});
+
+  @override
+  Widget build(BuildContext context) {
+    final imageBytes = doctor.profileImageData == null
+        ? null
+        : base64Decode(doctor.profileImageData!);
+    final feedbackAppointments = AppState.appointments
+        .where(
+          (appointment) =>
+              appointment.doctorUsername == doctor.username &&
+              appointment.feedbackSubmitted,
+        )
+        .toList();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F8FC),
+      appBar: AppBar(title: const Text("Doctor Profile")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0F3C73), AppColors.primary],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: imageBytes == null
+                        ? const Icon(
+                            Icons.local_hospital_rounded,
+                            size: 36,
+                            color: Colors.white,
+                          )
+                        : Image.memory(imageBytes, fit: BoxFit.cover),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          doctor.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          doctor.specialization,
+                          style: const TextStyle(
+                            color: Color(0xFFD7F0EC),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            _AdminInfoSection(
+              title: "Doctor details",
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _DetailRow(label: "Username", value: doctor.username),
+                  _DetailRow(label: "Clinic", value: doctor.clinicName),
+                  _DetailRow(label: "Address", value: doctor.clinicAddress),
+                  _DetailRow(label: "Location", value: doctor.clinicLocation),
+                  _DetailRow(label: "Phone", value: doctor.phone),
+                  _DetailRow(label: "PR", value: doctor.prNumber),
+                  _DetailRow(label: "NMC", value: doctor.nmcNumber),
+                  _DetailRow(label: "Licence", value: doctor.licenceNumber),
+                  _DetailRow(
+                    label: "Fee",
+                    value: "Rs ${doctor.consultationFee.toStringAsFixed(0)}",
+                  ),
+                  _DetailRow(label: "UPI ID", value: doctor.upiId),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _AdminInfoSection(
+              title: "Bio",
+              child: Text(
+                doctor.bio,
+                style: const TextStyle(color: AppColors.mutedText, height: 1.6),
+              ),
+            ),
+            const SizedBox(height: 16),
+            _AdminInfoSection(
+              title: "Patient feedback",
+              child: feedbackAppointments.isEmpty
+                  ? const Text(
+                      "No patient feedback available yet.",
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
+                    )
+                  : Column(
+                      children: feedbackAppointments
+                          .map(
+                            (appointment) => Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: _AdminDoctorFeedbackCard(
+                                appointment: appointment,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminPatientProfileScreen extends StatelessWidget {
+  final PatientModel patient;
+
+  const _AdminPatientProfileScreen({required this.patient});
+
+  @override
+  Widget build(BuildContext context) {
+    final imageBytes = patient.profileImageData == null
+        ? null
+        : base64Decode(patient.profileImageData!);
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F8FC),
+      appBar: AppBar(title: const Text("Patient Profile")),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF0F3C73), AppColors.primary],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(30),
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(22),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: imageBytes == null
+                        ? Center(
+                            child: Text(
+                              patient.name.isNotEmpty
+                                  ? patient.name[0].toUpperCase()
+                                  : "P",
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 28,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          )
+                        : Image.memory(imageBytes, fit: BoxFit.cover),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          patient.name,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          patient.username,
+                          style: const TextStyle(
+                            color: Color(0xFFD7F0EC),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 18),
+            _AdminInfoSection(
+              title: "Patient details",
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _DetailRow(label: "Name", value: patient.name),
+                  _DetailRow(label: "Date of birth", value: patient.dob),
+                  _DetailRow(label: "Email", value: patient.email),
+                  _DetailRow(label: "Phone", value: patient.phone),
+                  _DetailRow(label: "Address", value: patient.address),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            _AdminInfoSection(
+              title: "Medical reports",
+              child: patient.medicalReports.isEmpty
+                  ? const Text(
+                      "No medical reports available.",
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
+                    )
+                  : Column(
+                      children: patient.medicalReports
+                          .map(
+                            (report) => Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: _AdminMedicalReportCard(report: report),
+                            ),
+                          )
+                          .toList(),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminInfoSection extends StatelessWidget {
+  final String title;
+  final Widget child;
+
+  const _AdminInfoSection({required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(26),
@@ -1214,85 +1822,171 @@ class _PatientDirectoryCard extends StatelessWidget {
         ],
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.darkText,
+              fontWeight: FontWeight.w800,
+              fontSize: 18,
+            ),
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminMedicalReportCard extends StatelessWidget {
+  final MedicalReport report;
+
+  const _AdminMedicalReportCard({required this.report});
+
+  @override
+  Widget build(BuildContext context) {
+    final attachmentBytes = report.attachmentData == null
+        ? null
+        : base64Decode(report.attachmentData!);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBFD),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              Container(
-                width: 58,
-                height: 58,
-                decoration: BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: imageBytes == null
-                    ? Center(
-                        child: Text(
-                          patient.name.isNotEmpty
-                              ? patient.name[0].toUpperCase()
-                              : "P",
-                          style: const TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 22,
-                          ),
-                        ),
-                      )
-                    : Image.memory(imageBytes, fit: BoxFit.cover),
-              ),
-              const SizedBox(width: 16),
+              const Icon(Icons.description_outlined, color: AppColors.primary),
+              const SizedBox(width: 10),
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      patient.name,
-                      style: const TextStyle(
-                        color: AppColors.darkText,
-                        fontWeight: FontWeight.w800,
-                        fontSize: 16,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      patient.email,
-                      style: const TextStyle(color: AppColors.mutedText),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      patient.phone,
-                      style: const TextStyle(color: AppColors.mutedText),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: AppColors.accent,
-                  borderRadius: BorderRadius.circular(18),
-                ),
                 child: Text(
-                  "${patient.medicalReports.length} reports",
+                  report.title,
                   style: const TextStyle(
-                    color: AppColors.primary,
+                    color: AppColors.darkText,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 14),
-          Align(
-            alignment: Alignment.centerRight,
-            child: OutlinedButton.icon(
-              onPressed: deleteLocked ? null : () async => onDelete(),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppColors.danger,
+          if (attachmentBytes != null) ...[
+            const SizedBox(height: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: Image.memory(
+                attachmentBytes,
+                height: 160,
+                width: double.infinity,
+                fit: BoxFit.cover,
               ),
-              icon: const Icon(Icons.delete_outline_rounded),
-              label: const Text("Delete patient"),
             ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _AdminDoctorFeedbackCard extends StatelessWidget {
+  final AppointmentModel appointment;
+
+  const _AdminDoctorFeedbackCard({required this.appointment});
+
+  @override
+  Widget build(BuildContext context) {
+    PatientModel? patient;
+    for (final item in AppState.patients) {
+      if (item.username == appointment.patientUsername) {
+        patient = item;
+        break;
+      }
+    }
+    final imageBytes = patient?.profileImageData == null
+        ? null
+        : base64Decode(patient!.profileImageData!);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBFD),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 48,
+                height: 48,
+                decoration: BoxDecoration(
+                  color: AppColors.accent,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: imageBytes == null
+                    ? Center(
+                        child: Text(
+                          (patient?.name.isNotEmpty == true
+                                  ? patient!.name[0]
+                                  : appointment.patientUsername[0])
+                              .toUpperCase(),
+                          style: const TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      )
+                    : Image.memory(imageBytes, fit: BoxFit.cover),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      patient?.name.isNotEmpty == true
+                          ? patient!.name
+                          : appointment.patientUsername,
+                      style: const TextStyle(
+                        color: AppColors.darkText,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "${appointment.feedbackRating ?? '-'} / 5",
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (appointment.feedbackComments?.isNotEmpty == true) ...[
+            const SizedBox(height: 12),
+            Text(
+              appointment.feedbackComments!,
+              style: const TextStyle(color: AppColors.mutedText, height: 1.5),
+            ),
+          ],
+          const SizedBox(height: 12),
+          Text(
+            "${appointment.date} at ${appointment.time}",
+            style: const TextStyle(color: AppColors.mutedText, fontSize: 12),
           ),
         ],
       ),
@@ -1351,9 +2045,12 @@ class _AppointmentLogCard extends StatelessWidget {
                 ),
               ),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.14),
+                  color: statusColor.withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -1386,7 +2083,11 @@ class _AppointmentLogCard extends StatelessWidget {
           if (appointment.completedAt != null)
             _DetailRow(
               label: "Completed",
-              value: appointment.completedAt!.toLocal().toString().split('.').first,
+              value: appointment.completedAt!
+                  .toLocal()
+                  .toString()
+                  .split('.')
+                  .first,
             ),
           if (appointment.feedbackSubmitted) ...[
             _DetailRow(
@@ -1399,7 +2100,8 @@ class _AppointmentLogCard extends StatelessWidget {
               appointment.rescheduledTime != null)
             _DetailRow(
               label: "Rescheduled to",
-              value: "${appointment.rescheduledDate} at ${appointment.rescheduledTime}",
+              value:
+                  "${appointment.rescheduledDate} at ${appointment.rescheduledTime}",
             ),
           const SizedBox(height: 12),
           Align(

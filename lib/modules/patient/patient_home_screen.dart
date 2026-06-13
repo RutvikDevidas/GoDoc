@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/session/session_manager.dart';
+import '../../core/widgets/top_snackbar.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
@@ -32,19 +34,28 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   final Set<String> _notifiedCallIds = {};
   StreamSubscription<List<AppointmentModel>>? _appointmentSubscription;
   StreamSubscription<List<DoctorModel>>? _doctorSubscription;
+  final Map<String, String> _knownAppointmentStatuses = {};
+  final Map<String, bool> _knownCallStates = {};
 
   List<DoctorModel> get _verifiedDoctors =>
-      AppState.doctors.where((doctor) => doctor.verified).toList();
+      AppState.doctors.where((doctor) => doctor.verified).toList()
+        ..sort(
+          (left, right) =>
+              left.name.trim().toLowerCase().compareTo(
+                right.name.trim().toLowerCase(),
+              ),
+        );
 
   List<String> get _availableSpecializations {
-    final specializations = _verifiedDoctors
-        .map((doctor) => doctor.specialization.trim())
-        .where((specialization) => specialization.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort(
-        (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
-      );
+    final specializations =
+        _verifiedDoctors
+            .map((doctor) => doctor.specialization.trim())
+            .where((specialization) => specialization.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort(
+            (left, right) => left.toLowerCase().compareTo(right.toLowerCase()),
+          );
     return specializations;
   }
 
@@ -66,18 +77,9 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     }).toList();
   }
 
-  int get _upcomingAppointments => AppState.appointments
-      .where(
-        (appointment) => appointment.patientUsername == widget.patient.username,
-      )
-      .where(
-        (appointment) =>
-            appointment.status == "confirmed" ||
-            appointment.status == "pending",
-      )
-      .length;
-
-  void _logout() {
+  Future<void> _logout() async {
+    await SessionManager.clearSession();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const UnifiedLoginScreen()),
@@ -148,44 +150,84 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     _appointmentSubscription = FirestoreDataService.instance
         .watchAppointments(patientUsername: widget.patient.username)
         .listen((appointments) {
-          // Keep AppState in sync for the rest of the UI.
           FirestoreDataService.instance.mergeAppointmentsIntoAppState(
             appointments,
             patientUsername: widget.patient.username,
           );
 
           for (final appt in appointments) {
+            final previousStatus = _knownAppointmentStatuses[appt.id];
+            if (previousStatus != null && previousStatus != appt.status) {
+              _pushPatientNotification(
+                _statusMessageForPatient(appt),
+                variant: TopSnackbarVariant.info,
+              );
+            }
+            _knownAppointmentStatuses[appt.id] = appt.status;
+
+            final previousCallState = _knownCallStates[appt.id] ?? false;
             final shouldNotify =
                 appt.callStarted &&
+                !previousCallState &&
                 appt.callEndedAt == null &&
                 !_notifiedCallIds.contains(appt.id);
             if (shouldNotify && mounted) {
               _notifiedCallIds.add(appt.id);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    'Video call ready for Dr. ${appt.doctorUsername}',
-                  ),
-                  action: SnackBarAction(
-                    label: 'Open',
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => PatientAppointmentsScreen(
-                            patient: widget.patient,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
+              _pushPatientNotification(
+                'Video consultation is ready with Dr. ${appt.doctorUsername}.',
+                variant: TopSnackbarVariant.success,
+                actionLabel: 'Open',
+                onAction: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          PatientAppointmentsScreen(patient: widget.patient),
+                    ),
+                  );
+                },
               );
             }
+            _knownCallStates[appt.id] =
+                appt.callStarted && appt.callEndedAt == null;
           }
 
           if (mounted) setState(() {});
         });
+  }
+
+  void _pushPatientNotification(
+    String message, {
+    required TopSnackbarVariant variant,
+    String? actionLabel,
+    VoidCallback? onAction,
+  }) {
+    AppState.patientNotifications.add(message);
+    if (!mounted) return;
+    TopSnackbar.show(
+      context,
+      message: message,
+      variant: variant,
+      actionLabel: actionLabel,
+      onAction: onAction,
+    );
+  }
+
+  String _statusMessageForPatient(AppointmentModel appointment) {
+    switch (appointment.status) {
+      case 'confirmed':
+        return 'Your appointment with Dr. ${appointment.doctorUsername} has been confirmed.';
+      case 'rejected':
+        return 'Your appointment with Dr. ${appointment.doctorUsername} was rejected.';
+      case 'rescheduled':
+        return 'Your appointment was rescheduled to ${appointment.rescheduledDate ?? appointment.date} at ${appointment.rescheduledTime ?? appointment.time}.';
+      case 'completed':
+        return 'Your appointment with Dr. ${appointment.doctorUsername} was marked completed.';
+      case 'cancelled':
+        return 'Your appointment with Dr. ${appointment.doctorUsername} was cancelled.';
+      default:
+        return 'Your appointment status is now ${appointment.status}.';
+    }
   }
 
   bool _matchesCategory(String specialization, String category) {
@@ -251,9 +293,8 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                           icon: _iconForSpecialization(specialization),
                           title: specialization,
                           selected: selectedCategory == specialization,
-                          onTap: () => setState(
-                            () => selectedCategory = specialization,
-                          ),
+                          onTap: () =>
+                              setState(() => selectedCategory = specialization),
                         ),
                       )
                       .toList(),
@@ -412,7 +453,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             borderRadius: BorderRadius.circular(compact ? 24 : 30),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withOpacity(0.22),
+                color: AppColors.primary.withValues(alpha: 0.22),
                 blurRadius: 28,
                 offset: const Offset(0, 16),
               ),
@@ -574,7 +615,7 @@ class ServiceCard extends StatelessWidget {
               width: 44,
               decoration: BoxDecoration(
                 color: selected
-                    ? Colors.white.withOpacity(0.16)
+                    ? Colors.white.withValues(alpha: 0.16)
                     : AppColors.accent,
                 borderRadius: BorderRadius.circular(14),
               ),
@@ -713,7 +754,13 @@ class DoctorCard extends StatelessWidget {
       color: AppColors.accent,
       borderRadius: BorderRadius.circular(18),
     ),
-    child: const Icon(Icons.person_rounded, color: AppColors.primary, size: 30),
+    clipBehavior: Clip.antiAlias,
+    child: doctor.profileImageData?.isNotEmpty == true
+        ? Image.memory(
+            base64Decode(doctor.profileImageData!),
+            fit: BoxFit.cover,
+          )
+        : const Icon(Icons.person_rounded, color: AppColors.primary, size: 30),
   );
 
   Widget _buildDoctorText() => Column(

@@ -6,6 +6,8 @@ import '../../core/data/app_state.dart';
 import '../../core/firebase/firestore_data_service.dart';
 import '../../models/patient_model.dart';
 import '../../models/appointment_model.dart';
+import 'patient_home_screen.dart';
+import 'patient_profile_screen.dart';
 import '../video_call/video_call_screen.dart';
 
 class PatientAppointmentsScreen extends StatefulWidget {
@@ -19,6 +21,7 @@ class PatientAppointmentsScreen extends StatefulWidget {
 }
 
 class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
+  int _selectedIndex = 1;
   StreamSubscription<List<AppointmentModel>>? _appointmentSubscription;
 
   List<AppointmentModel> get myAppointments => AppState.appointments
@@ -144,6 +147,24 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
     ).showSnackBar(const SnackBar(content: Text('Feedback submitted')));
   }
 
+  void _onNavTapped(int index) {
+    if (index == _selectedIndex) return;
+
+    setState(() {
+      _selectedIndex = index;
+    });
+
+    final route = MaterialPageRoute(
+      builder: (_) => switch (index) {
+        0 => PatientHomeScreen(patient: widget.patient),
+        1 => PatientAppointmentsScreen(patient: widget.patient),
+        _ => PatientProfileScreen(patient: widget.patient),
+      },
+    );
+
+    Navigator.pushReplacement(context, route);
+  }
+
   @override
   Widget build(BuildContext context) {
     final appointments = myAppointments;
@@ -179,6 +200,30 @@ class _PatientAppointmentsScreenState extends State<PatientAppointmentsScreen> {
                 );
               },
             ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          selectedFontSize: 12,
+          unselectedFontSize: 12,
+          onTap: _onNavTapped,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded),
+              label: "Home",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month_rounded),
+              label: "Appointments",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline_rounded),
+              activeIcon: Icon(Icons.person_rounded),
+              label: "Profile",
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -339,7 +384,9 @@ class _AppointmentCard extends StatelessWidget {
           if (appointment.paymentPaidAt != null) ...[
             const SizedBox(height: 6),
             Text(
-              "Paid at: ${appointment.paymentPaidAt!.toLocal()}".split('.').first,
+              "Paid at: ${appointment.paymentPaidAt!.toLocal()}"
+                  .split('.')
+                  .first,
               style: const TextStyle(color: AppColors.mutedText),
             ),
           ],
@@ -387,15 +434,14 @@ class _AppointmentCard extends StatelessWidget {
               appointment.refundReason?.isNotEmpty == true
                   ? appointment.refundReason!
                   : "The doctor processed a full refund for this online consultation.",
-              style: const TextStyle(
-                color: AppColors.mutedText,
-                height: 1.4,
-              ),
+              style: const TextStyle(color: AppColors.mutedText, height: 1.4),
             ),
             if (appointment.refundedAt != null) ...[
               const SizedBox(height: 8),
               Text(
-                "Refund time: ${appointment.refundedAt!.toLocal()}".split('.').first,
+                "Refund time: ${appointment.refundedAt!.toLocal()}"
+                    .split('.')
+                    .first,
                 style: const TextStyle(fontSize: 12),
               ),
             ],
@@ -437,13 +483,11 @@ class _AppointmentCard extends StatelessWidget {
               child: const Text('Give feedback'),
             ),
 
-          if (appointment.status == "confirmed" && !appointment.feedbackSubmitted)
+          if (appointment.status == "confirmed" &&
+              !appointment.feedbackSubmitted)
             const Text(
               'Feedback becomes available after the doctor marks the appointment as completed.',
-              style: TextStyle(
-                color: AppColors.mutedText,
-                height: 1.4,
-              ),
+              style: TextStyle(color: AppColors.mutedText, height: 1.4),
             ),
 
           if (appointment.feedbackSubmitted)

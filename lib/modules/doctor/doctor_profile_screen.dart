@@ -70,7 +70,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                         width: 74,
                         height: 74,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.14),
+                          color: Colors.white.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(22),
                         ),
                         clipBehavior: Clip.antiAlias,
@@ -122,7 +122,8 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
                       ),
                       _Badge(
                         icon: Icons.currency_rupee_rounded,
-                        label: "Rs. ${doctor.consultationFee.toStringAsFixed(0)}",
+                        label:
+                            "Rs. ${doctor.consultationFee.toStringAsFixed(0)}",
                       ),
                     ],
                   ),
@@ -160,10 +161,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               title: "Bio",
               child: Text(
                 doctor.bio,
-                style: const TextStyle(
-                  color: AppColors.mutedText,
-                  height: 1.6,
-                ),
+                style: const TextStyle(color: AppColors.mutedText, height: 1.6),
               ),
             ),
             const SizedBox(height: 16),
@@ -172,10 +170,7 @@ class _DoctorProfileScreenState extends State<DoctorProfileScreen> {
               child: doctor.availability.isEmpty
                   ? const Text(
                       "No available slots right now. Add a new day and time slot from Edit Profile.",
-                      style: TextStyle(
-                        color: AppColors.mutedText,
-                        height: 1.5,
-                      ),
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
                     )
                   : Column(
                       children: doctor.availability
@@ -322,7 +317,7 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
@@ -347,10 +342,7 @@ class _LocationPreviewCard extends StatelessWidget {
   final double latitude;
   final double longitude;
 
-  const _LocationPreviewCard({
-    required this.latitude,
-    required this.longitude,
-  });
+  const _LocationPreviewCard({required this.latitude, required this.longitude});
 
   @override
   Widget build(BuildContext context) {
@@ -399,8 +391,8 @@ class _LocationPreviewCard extends StatelessWidget {
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withOpacity(0.0),
-                  Colors.black.withOpacity(0.25),
+                  Colors.black.withValues(alpha: 0.0),
+                  Colors.black.withValues(alpha: 0.25),
                 ],
               ),
             ),

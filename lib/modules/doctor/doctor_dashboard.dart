@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
+import '../../core/firebase/firestore_data_service.dart';
+import '../../core/session/session_manager.dart';
+import '../../core/widgets/top_snackbar.dart';
 import '../../models/appointment_model.dart';
 import '../../models/doctor_model.dart';
 import '../auth/unified_login_screen.dart';
@@ -20,13 +25,98 @@ class DoctorDashboard extends StatefulWidget {
 
 class _DoctorDashboardState extends State<DoctorDashboard> {
   int selectedIndex = 0;
+  StreamSubscription<List<AppointmentModel>>? _appointmentSubscription;
+  final Map<String, String> _knownStatuses = {};
+  final Map<String, bool> _knownFeedbackStates = {};
+  bool _hasHydratedAppointments = false;
 
-  void _logout() {
+  @override
+  void initState() {
+    super.initState();
+    _appointmentSubscription = FirestoreDataService.instance
+        .watchAppointments(doctorUsername: widget.doctor.username)
+        .listen((appointments) {
+          FirestoreDataService.instance.mergeAppointmentsIntoAppState(
+            appointments,
+            doctorUsername: widget.doctor.username,
+          );
+
+          for (final appointment in appointments) {
+            final previousStatus = _knownStatuses[appointment.id];
+            if (_hasHydratedAppointments && previousStatus == null) {
+              final message =
+                  'New appointment request from ${appointment.patientUsername} for ${appointment.date} at ${appointment.time}.';
+              AppState.doctorNotifications.add(message);
+              if (mounted) {
+                TopSnackbar.show(
+                  context,
+                  message: message,
+                  variant: TopSnackbarVariant.success,
+                );
+              }
+            } else if (previousStatus != appointment.status) {
+              final message = _appointmentUpdateMessage(appointment);
+              AppState.doctorNotifications.add(message);
+            }
+            _knownStatuses[appointment.id] = appointment.status;
+
+            final previousFeedback =
+                _knownFeedbackStates[appointment.id] ?? false;
+            if (!previousFeedback && appointment.feedbackSubmitted) {
+              final message =
+                  '${appointment.patientUsername} submitted feedback for the completed consultation.';
+              AppState.doctorNotifications.add(message);
+              if (mounted) {
+                TopSnackbar.show(
+                  context,
+                  message: message,
+                  variant: TopSnackbarVariant.info,
+                );
+              }
+            }
+            _knownFeedbackStates[appointment.id] =
+                appointment.feedbackSubmitted;
+          }
+
+          _hasHydratedAppointments = true;
+
+          if (mounted) {
+            setState(() {});
+          }
+        });
+  }
+
+  @override
+  void dispose() {
+    _appointmentSubscription?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _logout() async {
+    await SessionManager.clearSession();
+    if (!mounted) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const UnifiedLoginScreen()),
       (route) => false,
     );
+  }
+
+  String _appointmentUpdateMessage(AppointmentModel appointment) {
+    return switch (appointment.status) {
+      'confirmed' =>
+        '${appointment.patientUsername} appointment has been confirmed.',
+      'rescheduled' =>
+        '${appointment.patientUsername} appointment has been rescheduled.',
+      'completed' =>
+        '${appointment.patientUsername} appointment has been completed.',
+      'rejected' =>
+        '${appointment.patientUsername} appointment has been rejected.',
+      'cancelled' =>
+        '${appointment.patientUsername} appointment has been cancelled.',
+      'pending' => '${appointment.patientUsername} appointment is pending.',
+      _ => '${appointment.patientUsername} appointment was updated.',
+    };
   }
 
   @override
@@ -35,16 +125,23 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
     final isCompact = screenWidth < 430;
 
     final appointments = AppState.appointments
-        .where((appointment) => appointment.doctorUsername == widget.doctor.username)
+        .where(
+          (appointment) => appointment.doctorUsername == widget.doctor.username,
+        )
         .toList();
 
-    final pending = appointments.where((item) => item.status == "pending").length;
-    final confirmed =
-        appointments.where((item) => item.status == "confirmed").length;
-    final completed =
-        appointments.where((item) => item.status == "completed").length;
-    final rescheduled =
-        appointments.where((item) => item.status == "rescheduled").length;
+    final pending = appointments
+        .where((item) => item.status == "pending")
+        .length;
+    final confirmed = appointments
+        .where((item) => item.status == "confirmed")
+        .length;
+    final completed = appointments
+        .where((item) => item.status == "completed")
+        .length;
+    final rescheduled = appointments
+        .where((item) => item.status == "rescheduled")
+        .length;
 
     final pages = [
       _buildHome(
@@ -61,7 +158,6 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
     ];
 
     return Scaffold(
-      extendBody: true,
       appBar: AppBar(
         toolbarHeight: isCompact ? 72 : 78,
         title: Column(
@@ -367,7 +463,7 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
             borderRadius: BorderRadius.circular(compact ? 24 : 30),
             boxShadow: [
               BoxShadow(
-                color: AppColors.primary.withOpacity(0.2),
+                color: AppColors.primary.withValues(alpha: 0.2),
                 blurRadius: 28,
                 offset: const Offset(0, 16),
               ),
@@ -383,9 +479,12 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
                 crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
+                      color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: const Text(
@@ -397,9 +496,12 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 10,
+                    ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.12),
+                      color: Colors.white.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: Row(
@@ -431,7 +533,7 @@ class _DoctorDashboardState extends State<DoctorDashboard> {
                     width: compact ? 54 : 60,
                     height: compact ? 54 : 60,
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.16),
+                      color: Colors.white.withValues(alpha: 0.16),
                       borderRadius: BorderRadius.circular(18),
                     ),
                     child: Icon(
@@ -555,7 +657,7 @@ class _MetricCard extends StatelessWidget {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.16),
+              color: color.withValues(alpha: 0.16),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(icon, color: color, size: 22),
@@ -650,10 +752,7 @@ class _ActionCard extends StatelessWidget {
             const SizedBox(height: 6),
             Text(
               subtitle,
-              style: const TextStyle(
-                color: AppColors.mutedText,
-                height: 1.4,
-              ),
+              style: const TextStyle(color: AppColors.mutedText, height: 1.4),
             ),
             const SizedBox(height: 18),
             const Row(
@@ -704,7 +803,10 @@ class _AppointmentPreviewCard extends StatelessWidget {
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.accent,
                   borderRadius: BorderRadius.circular(20),
@@ -821,7 +923,7 @@ class _HeroStat extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Column(
@@ -955,10 +1057,7 @@ class _WideActionBanner extends StatelessWidget {
   final DoctorModel doctor;
   final VoidCallback onTap;
 
-  const _WideActionBanner({
-    required this.doctor,
-    required this.onTap,
-  });
+  const _WideActionBanner({required this.doctor, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1006,7 +1105,7 @@ class _WideActionBanner extends StatelessWidget {
               width: 54,
               height: 54,
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.16),
+                color: Colors.white.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(18),
               ),
               child: const Icon(
@@ -1078,4 +1177,3 @@ class _NextFocusCard extends StatelessWidget {
     );
   }
 }
-

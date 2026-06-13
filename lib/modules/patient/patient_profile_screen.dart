@@ -3,7 +3,9 @@ import 'dart:convert';
 
 import '../../core/constants/app_colors.dart';
 import '../../models/patient_model.dart';
+import 'patient_appointments_screen.dart';
 import 'patient_edit_profile_screen.dart';
+import 'patient_home_screen.dart';
 
 class PatientProfileScreen extends StatefulWidget {
   final PatientModel patient;
@@ -15,6 +17,26 @@ class PatientProfileScreen extends StatefulWidget {
 }
 
 class _PatientProfileScreenState extends State<PatientProfileScreen> {
+  int _selectedIndex = 2;
+
+  void _onNavTapped(int index) {
+    if (index == _selectedIndex) return;
+
+    setState(() {
+      _selectedIndex = index;
+    });
+
+    final route = MaterialPageRoute(
+      builder: (_) => switch (index) {
+        0 => PatientHomeScreen(patient: widget.patient),
+        1 => PatientAppointmentsScreen(patient: widget.patient),
+        _ => PatientProfileScreen(patient: widget.patient),
+      },
+    );
+
+    Navigator.pushReplacement(context, route);
+  }
+
   @override
   Widget build(BuildContext context) {
     final patient = widget.patient;
@@ -66,7 +88,7 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
                         width: 74,
                         height: 74,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.14),
+                          color: Colors.white.withValues(alpha: 0.14),
                           borderRadius: BorderRadius.circular(22),
                         ),
                         clipBehavior: Clip.antiAlias,
@@ -147,10 +169,7 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
               child: patient.medicalReports.isEmpty
                   ? const Text(
                       "No medical reports added yet.",
-                      style: TextStyle(
-                        color: AppColors.mutedText,
-                        height: 1.5,
-                      ),
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
                     )
                   : Column(
                       children: patient.medicalReports
@@ -162,6 +181,30 @@ class _PatientProfileScreenState extends State<PatientProfileScreen> {
                           )
                           .toList(),
                     ),
+            ),
+          ],
+        ),
+      ),
+      bottomNavigationBar: SafeArea(
+        top: false,
+        child: BottomNavigationBar(
+          currentIndex: _selectedIndex,
+          selectedFontSize: 12,
+          unselectedFontSize: 12,
+          onTap: _onNavTapped,
+          items: const [
+            BottomNavigationBarItem(
+              icon: Icon(Icons.home_rounded),
+              label: "Home",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.calendar_month_rounded),
+              label: "Appointments",
+            ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.person_outline_rounded),
+              activeIcon: Icon(Icons.person_rounded),
+              label: "Profile",
             ),
           ],
         ),
@@ -194,10 +237,7 @@ class _MedicalReportCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.description_outlined,
-                color: AppColors.primary,
-              ),
+              const Icon(Icons.description_outlined, color: AppColors.primary),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -314,7 +354,7 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(

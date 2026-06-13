@@ -80,9 +80,8 @@ class PatientModel {
       profileImageData: map['profileImageData']?.toString(),
       medicalReports: (map['medicalReports'] as List<dynamic>?)
           ?.map(
-            (report) => MedicalReport.fromMap(
-              Map<String, dynamic>.from(report as Map),
-            ),
+            (report) =>
+                MedicalReport.fromMap(Map<String, dynamic>.from(report as Map)),
           )
           .toList(),
     );

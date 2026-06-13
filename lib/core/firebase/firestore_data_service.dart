@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../data/app_state.dart';
@@ -16,8 +18,24 @@ class FirestoreDataService {
   DocumentReference<Map<String, dynamic>> get _godocRoot =>
       _firestore.collection('GODOC-app').doc('data');
 
+  static const String _approvedDoctorsBucketId = 'approved doctors';
+  static const String _pendingDoctorsBucketId = 'pending doctors';
+  static const String _rejectedDoctorsBucketId = 'rejected doctors';
+
   CollectionReference<Map<String, dynamic>> get _doctors =>
       _godocRoot.collection('doctors');
+
+  DocumentReference<Map<String, dynamic>> get _approvedDoctorsBucket =>
+      _doctors.doc(_approvedDoctorsBucketId);
+
+  DocumentReference<Map<String, dynamic>> get _pendingDoctorsBucket =>
+      _doctors.doc(_pendingDoctorsBucketId);
+
+  DocumentReference<Map<String, dynamic>> get _rejectedDoctorsBucket =>
+      _doctors.doc(_rejectedDoctorsBucketId);
+
+  CollectionReference<Map<String, dynamic>> _doctorProfiles(String bucketId) =>
+      _doctors.doc(bucketId).collection('profiles');
 
   CollectionReference<Map<String, dynamic>> get _admins =>
       _godocRoot.collection('admins');
@@ -38,9 +56,21 @@ class FirestoreDataService {
       _patientDoc(username).collection('feedback');
 
   CollectionReference<Map<String, dynamic>> _patientReports(String username) =>
-      _patientDoc(username).collection('patient_reports');
+      _patientDoc(username).collection('medical_reports');
 
   String _normalizedUsername(String username) => username.trim().toLowerCase();
+
+  Iterable<String> get _doctorBucketIds => const [
+    _approvedDoctorsBucketId,
+    _pendingDoctorsBucketId,
+    _rejectedDoctorsBucketId,
+  ];
+
+  String _doctorBucketIdFor(DoctorModel doctor) {
+    if (doctor.verified) return _approvedDoctorsBucketId;
+    if (doctor.rejected) return _rejectedDoctorsBucketId;
+    return _pendingDoctorsBucketId;
+  }
 
   Future<List<DoctorModel>> getDoctors({bool verifiedOnly = false}) async {
     if (!firebaseAvailable) {
@@ -49,13 +79,13 @@ class FirestoreDataService {
           : List<DoctorModel>.from(AppState.doctors);
     }
 
-    Query<Map<String, dynamic>> query = _doctors;
-    if (verifiedOnly) {
-      query = query.where('verified', isEqualTo: true);
-    }
+    await _ensureDoctorBucketDocs();
+    await _migrateLegacyDoctorDocuments();
 
-    final snapshot = await query.get();
-    return snapshot.docs.map((doc) => DoctorModel.fromMap(doc.data())).toList();
+    final bucketIds = verifiedOnly
+        ? <String>[_approvedDoctorsBucketId]
+        : _doctorBucketIds.toList();
+    return _getDoctorsFromBuckets(bucketIds);
   }
 
   Future<List<AdminModel>> getAdmins() async {
@@ -69,11 +99,26 @@ class FirestoreDataService {
 
   Future<List<PatientModel>> getPatients() async {
     if (!firebaseAvailable) {
+      print(
+        'ℹ️  Firebase unavailable - returning cached patients. Count: ${AppState.patients.length}',
+      );
       return List<PatientModel>.from(AppState.patients);
     }
 
-    final snapshot = await _patients.get();
-    return snapshot.docs.map((doc) => PatientModel.fromMap(doc.data())).toList();
+    try {
+      print('🔄 Fetching patients from Firestore...');
+      final snapshot = await _patients.get();
+      print('✅ Fetched ${snapshot.docs.length} patient documents');
+
+      final patients = await _hydratePatientsWithReports(snapshot.docs);
+      print(
+        '✅ Successfully hydrated ${patients.length} patients with their medical reports',
+      );
+      return patients;
+    } catch (e) {
+      print('❌ Error fetching patients: $e');
+      rethrow;
+    }
   }
 
   Future<List<AppointmentModel>> getAppointments({
@@ -108,12 +153,22 @@ class FirestoreDataService {
 
   Future<DoctorModel?> getDoctorByUsername(String username) async {
     if (!firebaseAvailable) {
-      return AppState.doctors.where((doctor) => doctor.username == username).firstOrNull;
+      return AppState.doctors
+          .where((doctor) => doctor.username == username)
+          .firstOrNull;
     }
 
-    final snapshot = await _doctors.doc(username).get();
-    if (!snapshot.exists || snapshot.data() == null) return null;
-    return DoctorModel.fromMap(snapshot.data()!);
+    await _ensureDoctorBucketDocs();
+    await _migrateLegacyDoctorDocuments();
+
+    for (final bucketId in _doctorBucketIds) {
+      final snapshot = await _doctorProfiles(bucketId).doc(username).get();
+      if (snapshot.exists && snapshot.data() != null) {
+        return DoctorModel.fromMap(snapshot.data()!);
+      }
+    }
+
+    return null;
   }
 
   Future<AdminModel?> getAdminByUsername(String username) async {
@@ -130,17 +185,21 @@ class FirestoreDataService {
 
   Future<PatientModel?> getPatientByUsername(String username) async {
     if (!firebaseAvailable) {
-      return AppState.patients.where((patient) => patient.username == username).firstOrNull;
+      return AppState.patients
+          .where((patient) => patient.username == username)
+          .firstOrNull;
     }
 
     final snapshot = await _patients.doc(username).get();
     if (!snapshot.exists || snapshot.data() == null) return null;
-    return PatientModel.fromMap(snapshot.data()!);
+    return _hydratePatientReports(PatientModel.fromMap(snapshot.data()!));
   }
 
   Future<AppointmentModel?> getAppointmentById(String id) async {
     if (!firebaseAvailable) {
-      return AppState.appointments.where((appointment) => appointment.id == id).firstOrNull;
+      return AppState.appointments
+          .where((appointment) => appointment.id == id)
+          .firstOrNull;
     }
 
     final snapshot = await _appointments.doc(id).get();
@@ -156,16 +215,42 @@ class FirestoreDataService {
       return Stream.value(doctors);
     }
 
-    Query<Map<String, dynamic>> query = _doctors;
-    if (verifiedOnly) {
-      query = query.where('verified', isEqualTo: true);
+    final bucketIds = verifiedOnly
+        ? <String>[_approvedDoctorsBucketId]
+        : _doctorBucketIds.toList();
+
+    late final StreamController<List<DoctorModel>> controller;
+    final subscriptions =
+        <StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>[];
+    final snapshotsByBucket = <String, List<DoctorModel>>{
+      for (final bucketId in bucketIds) bucketId: <DoctorModel>[],
+    };
+
+    void emitCombined() {
+      final doctors = <DoctorModel>[];
+      for (final bucketId in bucketIds) {
+        doctors.addAll(snapshotsByBucket[bucketId] ?? const <DoctorModel>[]);
+      }
+      controller.add(doctors);
     }
 
-    return query.snapshots().map((snapshot) {
-      return snapshot.docs
-          .map((doc) => DoctorModel.fromMap(doc.data()))
-          .toList();
-    });
+    controller = StreamController<List<DoctorModel>>(
+      onListen: () {
+        _startWatchingDoctorBuckets(
+          bucketIds: bucketIds,
+          subscriptions: subscriptions,
+          snapshotsByBucket: snapshotsByBucket,
+          emitCombined: emitCombined,
+        );
+      },
+      onCancel: () async {
+        for (final subscription in subscriptions) {
+          await subscription.cancel();
+        }
+      },
+    );
+
+    return controller.stream;
   }
 
   /// Watch appointment documents matching the given filters.
@@ -213,22 +298,13 @@ class FirestoreDataService {
       id: DemoSeedData.defaultAdmin.username,
       data: DemoSeedData.defaultAdmin.toMap(),
     );
-    await _ensureDocumentExists(
-      collection: _doctors,
-      id: DemoSeedData.demoDoctor.username,
-      data: DemoSeedData.demoDoctor.toMap(),
-    );
-    await _seedCollectionIfEmpty<DoctorModel>(
-      collection: _doctors,
-      items: AppState.doctors,
-      idFor: (doctor) => doctor.username,
-      mapFor: (doctor) => doctor.toMap(),
-    );
+    await _ensureDoctorBucketDocs();
+    await _seedDoctorsIfEmpty(AppState.doctors);
     await _seedCollectionIfEmpty<PatientModel>(
       collection: _patients,
       items: AppState.patients,
       idFor: (patient) => patient.username,
-      mapFor: (patient) => patient.toMap(),
+      mapFor: (patient) => _patientDocumentMap(patient),
     );
     await _seedCollectionIfEmpty<AppointmentModel>(
       collection: _appointments,
@@ -243,28 +319,51 @@ class FirestoreDataService {
 
   Future<void> syncAllToAppState() async {
     if (!firebaseAvailable) {
+      print('ℹ️  Firebase unavailable - sync skipped');
       return;
     }
 
-    final adminsSnapshot = await _admins.get();
-    final doctorsSnapshot = await _doctors.get();
-    final patientsSnapshot = await _patients.get();
-    final appointmentsSnapshot = await _appointments.get();
+    try {
+      print('🔄 Starting full app state sync from Firestore...');
 
-    AppState.admins = adminsSnapshot.docs
-        .map((doc) => AdminModel.fromMap(doc.data()))
-        .toList();
-    AppState.doctors = doctorsSnapshot.docs
-        .map((doc) => DoctorModel.fromMap(doc.data()))
-        .toList();
-    AppState.patients = patientsSnapshot.docs
-        .map((doc) => PatientModel.fromMap(doc.data()))
-        .toList();
-    AppState.appointments = appointmentsSnapshot.docs
-        .map((doc) => AppointmentModel.fromMap(doc.data()))
-        .toList();
+      final adminsSnapshot = await _admins.get();
+      print('✅ Fetched ${adminsSnapshot.docs.length} admins');
 
-    await _cleanupExpiredDoctorAvailability();
+      final patientsSnapshot = await _patients.get();
+      print('✅ Fetched ${patientsSnapshot.docs.length} patient documents');
+
+      final appointmentsSnapshot = await _appointments.get();
+      print('✅ Fetched ${appointmentsSnapshot.docs.length} appointments');
+
+      AppState.admins = adminsSnapshot.docs
+          .map((doc) => AdminModel.fromMap(doc.data()))
+          .toList();
+      print('✅ Updated AppState.admins (${AppState.admins.length} records)');
+
+      AppState.doctors = await getDoctors();
+      print('✅ Updated AppState.doctors (${AppState.doctors.length} records)');
+
+      AppState.patients = await _hydratePatientsWithReports(
+        patientsSnapshot.docs,
+      );
+      print(
+        '✅ Updated AppState.patients (${AppState.patients.length} records)',
+      );
+
+      AppState.appointments = appointmentsSnapshot.docs
+          .map((doc) => AppointmentModel.fromMap(doc.data()))
+          .toList();
+      print(
+        '✅ Updated AppState.appointments (${AppState.appointments.length} records)',
+      );
+
+      await _cleanupExpiredDoctorAvailability();
+      print('✅ Full app state sync completed successfully');
+    } catch (e) {
+      print('❌ Error during app state sync: $e');
+      print('Stack: ${StackTrace.current}');
+      rethrow;
+    }
   }
 
   Future<DoctorModel?> findDoctorByCredentials({
@@ -280,14 +379,9 @@ class FirestoreDataService {
           .firstOrNull;
     }
 
-    final snapshot = await _doctors
-        .where('username', isEqualTo: username)
-        .where('password', isEqualTo: password)
-        .limit(1)
-        .get();
-
-    if (snapshot.docs.isEmpty) return null;
-    return DoctorModel.fromMap(snapshot.docs.first.data());
+    final doctor = await getDoctorByUsername(username.trim());
+    if (doctor == null) return null;
+    return doctor.password == password ? doctor : null;
   }
 
   Future<AdminModel?> findAdminByCredentials({
@@ -297,20 +391,17 @@ class FirestoreDataService {
     if (!firebaseAvailable) {
       return AppState.admins
           .where(
-            (admin) =>
-                admin.username == username && admin.password == password,
+            (admin) => admin.username == username && admin.password == password,
           )
           .firstOrNull;
     }
 
-    final snapshot = await _admins
-        .where('username', isEqualTo: username)
-        .where('password', isEqualTo: password)
-        .limit(1)
-        .get();
+    final document = await _admins.doc(username.trim()).get();
+    final data = document.data();
+    if (data == null) return null;
 
-    if (snapshot.docs.isEmpty) return null;
-    return AdminModel.fromMap(snapshot.docs.first.data());
+    final admin = AdminModel.fromMap(data);
+    return admin.password == password ? admin : null;
   }
 
   Future<PatientModel?> findPatientByCredentials({
@@ -326,14 +417,12 @@ class FirestoreDataService {
           .firstOrNull;
     }
 
-    final snapshot = await _patients
-        .where('username', isEqualTo: username)
-        .where('password', isEqualTo: password)
-        .limit(1)
-        .get();
+    final document = await _patients.doc(username.trim()).get();
+    final data = document.data();
+    if (data == null) return null;
 
-    if (snapshot.docs.isEmpty) return null;
-    return PatientModel.fromMap(snapshot.docs.first.data());
+    final patient = PatientModel.fromMap(data);
+    return patient.password == password ? patient : null;
   }
 
   Future<bool> usernameExists(
@@ -371,13 +460,10 @@ class FirestoreDataService {
 
     if (!firebaseAvailable) return false;
 
-    final doctorSnapshot = await _doctors
-        .where('username', isEqualTo: username.trim())
-        .limit(1)
-        .get();
-    final doctorTaken = doctorSnapshot.docs.any(
-      (doc) => _normalizedUsername(doc.id) != normalizedExcludedDoctor,
-    );
+    final doctor = await getDoctorByUsername(username.trim());
+    final doctorTaken =
+        doctor != null &&
+        _normalizedUsername(doctor.username) != normalizedExcludedDoctor;
     if (doctorTaken) return true;
 
     final patientSnapshot = await _patients
@@ -432,9 +518,8 @@ class FirestoreDataService {
 
     if (!firebaseAvailable) return null;
 
-    final doctorSnapshot = await _doctors.limit(500).get();
-    for (final doc in doctorSnapshot.docs) {
-      final doctor = DoctorModel.fromMap(doc.data());
+    final doctors = await getDoctors();
+    for (final doctor in doctors) {
       if (matchesExcludedDoctor(doctor)) continue;
 
       if (normalize(doctor.prNumber) == normalizedPrNumber) {
@@ -468,7 +553,7 @@ class FirestoreDataService {
   }
 
   Future<void> saveDoctor(DoctorModel doctor) async {
-    doctor.availability = normalizeUpcomingAvailability(doctor.availability);
+    doctor.refreshAvailability();
 
     if (!firebaseAvailable) {
       final index = AppState.doctors.indexWhere(
@@ -482,7 +567,8 @@ class FirestoreDataService {
       return;
     }
 
-    await _doctors.doc(doctor.username).set(doctor.toMap());
+    await _ensureDoctorBucketDocs();
+    await _upsertDoctorInBuckets(doctor);
   }
 
   Future<void> updateDoctorReviewStatus({
@@ -501,10 +587,11 @@ class FirestoreDataService {
       return;
     }
 
-    await _doctors.doc(username).set({
-      'verified': verified,
-      'rejected': rejected,
-    }, SetOptions(merge: true));
+    final doctor = await getDoctorByUsername(username);
+    if (doctor == null) return;
+    doctor.verified = verified;
+    doctor.rejected = rejected;
+    await saveDoctor(doctor);
   }
 
   Future<void> savePatient(PatientModel patient) async {
@@ -520,8 +607,46 @@ class FirestoreDataService {
       return;
     }
 
-    await _patients.doc(patient.username).set(patient.toMap());
+    await _patients.doc(patient.username).set(_patientDocumentMap(patient));
     await _syncPatientReportsSubcollection(patient);
+  }
+
+  Future<void> addMedicalReportForPatient({
+    required String patientUsername,
+    required MedicalReport report,
+  }) async {
+    if (!firebaseAvailable) {
+      final patient = AppState.patients
+          .where(
+            (existingPatient) => existingPatient.username == patientUsername,
+          )
+          .firstOrNull;
+      if (patient == null) return;
+
+      patient.medicalReports = List<MedicalReport>.from(patient.medicalReports)
+        ..add(report);
+      return;
+    }
+
+    final reportsCollection = _patientReports(patientUsername);
+    final reportCount = (await reportsCollection.count().get()).count ?? 0;
+    final docId = 'report_${(reportCount + 1).toString().padLeft(3, '0')}';
+
+    await reportsCollection.doc(docId).set({
+      ...report.toMap(),
+      'patientUsername': patientUsername,
+      'reportIndex': reportCount,
+      'createdAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    final patientIndex = AppState.patients.indexWhere(
+      (existingPatient) => existingPatient.username == patientUsername,
+    );
+    if (patientIndex >= 0) {
+      AppState.patients[patientIndex].medicalReports = List<MedicalReport>.from(
+        AppState.patients[patientIndex].medicalReports,
+      )..add(report);
+    }
   }
 
   Future<void> saveAppointment(AppointmentModel appointment) async {
@@ -566,7 +691,9 @@ class FirestoreDataService {
   ) async {
     if (!firebaseAvailable) {
       final appointment = AppState.appointments
-          .where((existingAppointment) => existingAppointment.id == appointmentId)
+          .where(
+            (existingAppointment) => existingAppointment.id == appointmentId,
+          )
           .firstOrNull;
       if (appointment == null) return;
 
@@ -584,7 +711,9 @@ class FirestoreDataService {
       return;
     }
 
-    await _appointments.doc(appointmentId).set(updates, SetOptions(merge: true));
+    await _appointments
+        .doc(appointmentId)
+        .set(updates, SetOptions(merge: true));
   }
 
   Future<void> saveAppointmentFeedback({
@@ -620,7 +749,9 @@ class FirestoreDataService {
         .get();
 
     final batch = _firestore.batch();
-    batch.delete(_doctors.doc(username));
+    for (final bucketId in _doctorBucketIds) {
+      batch.delete(_doctorProfiles(bucketId).doc(username));
+    }
     for (final doc in appointmentSnapshot.docs) {
       batch.delete(doc.reference);
     }
@@ -699,8 +830,15 @@ class FirestoreDataService {
   }
 
   Future<void> _backfillPatientSubcollections() async {
+    await _ensureDoctorBucketDocs();
+    await _migrateLegacyDoctorDocuments();
+
     for (final patient in AppState.patients) {
       await _syncPatientReportsSubcollection(patient);
+      await _patientDoc(patient.username).set({
+        'medicalReports': FieldValue.delete(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
     }
 
     for (final appointment in AppState.appointments) {
@@ -710,20 +848,66 @@ class FirestoreDataService {
 
   Future<void> _cleanupExpiredDoctorAvailability() async {
     for (final doctor in AppState.doctors) {
-      final normalizedAvailability = normalizeUpcomingAvailability(
-        doctor.availability,
-      );
+      final previousWeekly = doctor.weeklyAvailability
+          .map(
+            (slot) => DoctorWeeklyAvailability(
+              weekday: slot.weekday,
+              timeSlots: List<String>.from(slot.timeSlots),
+            ),
+          )
+          .toList();
+      final previousOverrides = doctor.availabilityOverrides
+          .map(
+            (slot) => DoctorAvailability(
+              date: slot.date,
+              timeSlots: List<String>.from(slot.timeSlots),
+            ),
+          )
+          .toList();
+      final previousAvailability = doctor.availability
+          .map(
+            (slot) => DoctorAvailability(
+              date: slot.date,
+              timeSlots: List<String>.from(slot.timeSlots),
+            ),
+          )
+          .toList();
+
+      doctor.refreshAvailability();
       final changed =
-          normalizedAvailability.length != doctor.availability.length ||
-          !_sameDoctorAvailability(normalizedAvailability, doctor.availability);
+          !_sameWeeklyAvailability(previousWeekly, doctor.weeklyAvailability) ||
+          !_sameDoctorAvailability(
+            previousOverrides,
+            doctor.availabilityOverrides,
+          ) ||
+          !_sameDoctorAvailability(previousAvailability, doctor.availability);
 
       if (!changed) continue;
 
-      doctor.availability = normalizedAvailability;
-      await _doctors.doc(doctor.username).set({
-        'availability': normalizedAvailability.map((slot) => slot.toMap()).toList(),
-      }, SetOptions(merge: true));
+      await saveDoctor(doctor);
     }
+  }
+
+  bool _sameWeeklyAvailability(
+    List<DoctorWeeklyAvailability> first,
+    List<DoctorWeeklyAvailability> second,
+  ) {
+    if (first.length != second.length) return false;
+
+    for (var index = 0; index < first.length; index++) {
+      final left = first[index];
+      final right = second[index];
+      if (left.weekday != right.weekday) return false;
+      if (left.timeSlots.length != right.timeSlots.length) return false;
+
+      for (var slotIndex = 0; slotIndex < left.timeSlots.length; slotIndex++) {
+        if (left.timeSlots[slotIndex] != right.timeSlots[slotIndex]) {
+          return false;
+        }
+      }
+    }
+
+    return true;
   }
 
   bool _sameDoctorAvailability(
@@ -771,6 +955,144 @@ class FirestoreDataService {
     await batch.commit();
   }
 
+  Future<void> _ensureDoctorBucketDocs() async {
+    await _approvedDoctorsBucket.set({
+      'label': _approvedDoctorsBucketId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _pendingDoctorsBucket.set({
+      'label': _pendingDoctorsBucketId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+    await _rejectedDoctorsBucket.set({
+      'label': _rejectedDoctorsBucketId,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  Future<List<DoctorModel>> _getDoctorsFromBuckets(
+    List<String> bucketIds,
+  ) async {
+    final doctors = <DoctorModel>[];
+    for (final bucketId in bucketIds) {
+      final snapshot = await _doctorProfiles(bucketId).get();
+      doctors.addAll(
+        snapshot.docs.map((doc) => DoctorModel.fromMap(doc.data())),
+      );
+    }
+    return doctors;
+  }
+
+  Future<void> _seedDoctorsIfEmpty(List<DoctorModel> doctors) async {
+    final existingDoctors = await _getDoctorsFromBuckets(
+      _doctorBucketIds.toList(),
+    );
+    if (existingDoctors.isNotEmpty) return;
+
+    for (final doctor in doctors) {
+      await saveDoctor(doctor);
+    }
+  }
+
+  Future<void> _startWatchingDoctorBuckets({
+    required List<String> bucketIds,
+    required List<StreamSubscription<QuerySnapshot<Map<String, dynamic>>>>
+    subscriptions,
+    required Map<String, List<DoctorModel>> snapshotsByBucket,
+    required void Function() emitCombined,
+  }) async {
+    await _ensureDoctorBucketDocs();
+    await _migrateLegacyDoctorDocuments();
+
+    for (final bucketId in bucketIds) {
+      final subscription = _doctorProfiles(bucketId).snapshots().listen((
+        snapshot,
+      ) {
+        snapshotsByBucket[bucketId] = snapshot.docs
+            .map((doc) => DoctorModel.fromMap(doc.data()))
+            .toList();
+        emitCombined();
+      });
+      subscriptions.add(subscription);
+    }
+  }
+
+  Future<void> _upsertDoctorInBuckets(DoctorModel doctor) async {
+    final targetBucketId = _doctorBucketIdFor(doctor);
+    final batch = _firestore.batch();
+
+    for (final bucketId in _doctorBucketIds) {
+      final ref = _doctorProfiles(bucketId).doc(doctor.username);
+      if (bucketId == targetBucketId) {
+        batch.set(ref, {
+          ...doctor.toMap(),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } else {
+        batch.delete(ref);
+      }
+    }
+
+    await batch.commit();
+  }
+
+  Future<void> _migrateLegacyDoctorDocuments() async {
+    final snapshot = await _doctors.get();
+    final legacyDocs = snapshot.docs.where(
+      (doc) =>
+          !_doctorBucketIds.contains(doc.id) &&
+          (doc.data()['username']?.toString().trim().isNotEmpty ?? false),
+    );
+
+    for (final doc in legacyDocs) {
+      final doctor = DoctorModel.fromMap(doc.data());
+      await _upsertDoctorInBuckets(doctor);
+      await doc.reference.delete();
+    }
+  }
+
+  Map<String, dynamic> _patientDocumentMap(PatientModel patient) {
+    final data = Map<String, dynamic>.from(patient.toMap());
+    data.remove('medicalReports');
+    data['updatedAt'] = FieldValue.serverTimestamp();
+    return data;
+  }
+
+  Future<PatientModel> _hydratePatientReports(PatientModel patient) async {
+    final reportsSnapshot = await _patientReports(
+      patient.username,
+    ).orderBy('reportIndex').get();
+    patient.medicalReports = reportsSnapshot.docs
+        .map((doc) => MedicalReport.fromMap(doc.data()))
+        .toList();
+    return patient;
+  }
+
+  Future<List<PatientModel>> _hydratePatientsWithReports(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    print('🔍 Hydrating ${docs.length} patients with medical reports...');
+    final patients = docs
+        .map((doc) => PatientModel.fromMap(doc.data()))
+        .toList();
+
+    int successCount = 0;
+    for (final patient in patients) {
+      try {
+        await _hydratePatientReports(patient);
+        successCount++;
+      } catch (e) {
+        print(
+          '⚠️  Failed to hydrate reports for patient ${patient.username}: $e',
+        );
+      }
+    }
+    print(
+      '✅ Hydration complete: $successCount/${patients.length} patients successfully hydrated',
+    );
+    return patients;
+  }
+
   Future<void> _syncPatientAppointmentSubcollections(
     AppointmentModel appointment,
   ) async {
@@ -807,6 +1129,47 @@ class FirestoreDataService {
       'completedAt': appointment.completedAt?.toIso8601String(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+  }
+
+  /// Diagnostic method to check patient data status
+  Future<String> diagnosePatientDataStatus() async {
+    try {
+      if (!firebaseAvailable) {
+        return '⚠️ Firebase is unavailable. Using cached data.\n'
+            'Cached patients: ${AppState.patients.length}';
+      }
+
+      final snapshot = await _patients.get();
+      final patientCount = snapshot.docs.length;
+
+      if (patientCount == 0) {
+        return '⚠️ No patients found in Firestore.\n'
+            'Patients collection exists but is empty.\n'
+            'Ensure patient registration is working correctly.';
+      }
+
+      // Check if we can load the first patient's data
+      if (snapshot.docs.isNotEmpty) {
+        final firstPatientDoc = snapshot.docs.first;
+        final username = firstPatientDoc.get('username') ?? 'unknown';
+
+        try {
+          final reportsSnapshot = await _patientReports(
+            username,
+          ).limit(1).get();
+          return '✅ Patient data is accessible!\n'
+              'Total patients: $patientCount\n'
+              'Sample patient: $username\n'
+              'Medical reports: ${reportsSnapshot.docs.length}';
+        } catch (e) {
+          return '❌ Error loading medical reports for patient $username:\n$e';
+        }
+      }
+
+      return '✅ Patient data found: $patientCount patients in Firestore';
+    } catch (e) {
+      return '❌ Diagnostic error: $e';
+    }
   }
 }
 

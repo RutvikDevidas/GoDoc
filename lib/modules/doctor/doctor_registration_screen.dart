@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/firebase/firestore_data_service.dart';
 import '../../models/doctor_model.dart';
@@ -40,16 +42,26 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   final licenceNumber = TextEditingController();
   final specialization = TextEditingController();
   final phone = TextEditingController();
+  final otp = TextEditingController();
   final clinicName = TextEditingController();
   final clinicAddress = TextEditingController();
+  final bio = TextEditingController();
   final _usernamePattern = RegExp(r'^[a-zA-Z0-9_]{4,20}$');
-  final _phonePattern = RegExp(r'^[0-9]{7,15}$');
+  final _phonePattern = RegExp(r'^\+?[0-9]{10,15}$');
   final _credentialPattern = RegExp(r'^[A-Za-z0-9/-]{4,30}$');
 
   int currentStep = 0;
   String? selectedSpecialization;
   double? selectedLatitude;
   double? selectedLongitude;
+  String? _verificationId;
+  ConfirmationResult? _confirmationResult;
+  int? _resendToken;
+  bool _otpSent = false;
+  bool _verifyingOtp = false;
+  bool _sendingOtp = false;
+  bool _otpVerified = false;
+  String? _verifiedPhoneNumber;
 
   @override
   void dispose() {
@@ -62,8 +74,10 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     licenceNumber.dispose();
     specialization.dispose();
     phone.dispose();
+    otp.dispose();
     clinicName.dispose();
     clinicAddress.dispose();
+    bio.dispose();
     super.dispose();
   }
 
@@ -116,6 +130,8 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         return _hasValues([phone, clinicName, clinicAddress]) &&
             _validateClinicStep() &&
             _validateClinicLocation();
+      case 3:
+        return _validateOtpStep();
       default:
         return false;
     }
@@ -175,10 +191,19 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
 
   bool _validateClinicStep() {
     if (!_phonePattern.hasMatch(phone.text.trim())) {
-      _showMessage("Enter a valid phone number.");
+      _showMessage("Enter a valid phone number with 10-15 digits.");
       return false;
     }
     return true;
+  }
+
+  bool _validateOtpStep() {
+    if (_otpVerified && _verifiedPhoneNumber == _normalizedPhoneNumber) {
+      return true;
+    }
+
+    _showMessage("Please verify your phone number with SMS OTP.");
+    return false;
   }
 
   void _showMessage(String message) {
@@ -206,6 +231,10 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     setState(() {
       currentStep += 1;
     });
+
+    if (currentStep == 3 && !_otpSent) {
+      _sendOtp();
+    }
   }
 
   void _previousStep() {
@@ -215,12 +244,13 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
   }
 
   Future<void> addDoctor() async {
-    if (!_validateStep(2)) return;
+    if (!_validateStep(2) || !_validateStep(3)) return;
 
     // Prevent duplicate usernames before writing the doctor document.
     final usernameTaken = await FirestoreDataService.instance
         .usernameExists(username.text.trim())
         .timeout(const Duration(seconds: 8));
+    if (!mounted) return;
     if (usernameTaken) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -237,6 +267,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
           licenceNumber: licenceNumber.text.trim(),
         )
         .timeout(const Duration(seconds: 8));
+    if (!mounted) return;
     if (duplicateCredential != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -249,67 +280,28 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     }
 
     try {
-      // Store the current form values directly from the existing controllers.
-      await FirebaseFirestore.instance
-          .collection("GODOC-app")
-          .doc("data")
-          .collection("doctors")
-          .doc(username.text.trim())
-          .set({
-            "username": username.text.trim(),
-            "password": password.text.trim(),
-            "name": name.text.trim(),
-            "dob": dob.text.trim(),
-            "prNumber": prNumber.text.trim(),
-            "nmcNumber": nmcNumber.text.trim(),
-            "licenceNumber": licenceNumber.text.trim(),
-            "specialization": specialization.text.trim(),
-            "phone": phone.text.trim(),
-            "clinicName": clinicName.text.trim(),
-            "clinicAddress": clinicAddress.text.trim(),
-            "clinicLocation": _clinicLocationLabel,
-            "clinicLatitude": selectedLatitude,
-            "clinicLongitude": selectedLongitude,
-            "bio":
-                "${name.text.trim()} is a trusted ${specialization.text.trim()} offering patient-focused care, clear guidance, and consistent follow-up through ${clinicName.text.trim()}.",
-            "upiId": "",
-            "bankAccountHolder": "",
-            "bankName": "",
-            "bankAccountNumber": "",
-            "bankIfscCode": "",
-            "profileImageData": null,
-            "consultationFee": 500,
-            "availability": [
-              DoctorAvailability(
-                date: DateTime(
-                  DateTime.now().year,
-                  DateTime.now().month,
-                  DateTime.now().day,
-                ).add(const Duration(days: 1)),
-                timeSlots: const ["10:00 AM", "11:00 AM", "01:30 PM"],
-              ),
-              DoctorAvailability(
-                date: DateTime(
-                  DateTime.now().year,
-                  DateTime.now().month,
-                  DateTime.now().day,
-                ).add(const Duration(days: 2)),
-                timeSlots: const ["09:30 AM", "12:00 PM", "03:30 PM"],
-              ),
-              DoctorAvailability(
-                date: DateTime(
-                  DateTime.now().year,
-                  DateTime.now().month,
-                  DateTime.now().day,
-                ).add(const Duration(days: 4)),
-                timeSlots: const ["10:30 AM", "02:00 PM", "05:00 PM"],
-              ),
-            ].map((slot) => slot.toMap()).toList(),
-            "verified": false,
-            "rejected": false,
-            "createdAt": FieldValue.serverTimestamp(),
-            "updatedAt": FieldValue.serverTimestamp(),
-          })
+      final doctor = DoctorModel(
+        username: username.text.trim(),
+        password: password.text.trim(),
+        name: name.text.trim(),
+        dob: dob.text.trim(),
+        prNumber: prNumber.text.trim(),
+        nmcNumber: nmcNumber.text.trim(),
+        licenceNumber: licenceNumber.text.trim(),
+        specialization: specialization.text.trim(),
+        phone: phone.text.trim(),
+        clinicName: clinicName.text.trim(),
+        clinicAddress: clinicAddress.text.trim(),
+        clinicLocation: _clinicLocationLabel,
+        clinicLatitude: selectedLatitude,
+        clinicLongitude: selectedLongitude,
+        bio: bio.text.trim().isEmpty ? null : bio.text.trim(),
+        verified: false,
+        rejected: false,
+      );
+
+      await FirestoreDataService.instance
+          .saveDoctor(doctor)
           .timeout(const Duration(seconds: 8));
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -342,57 +334,97 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F8FC),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8FBFB), AppColors.background],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeroCard(),
-                const SizedBox(height: 20),
-                _StepIndicator(currentStep: currentStep),
-                const SizedBox(height: 20),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 220),
-                  child: _StepPage(
-                    key: ValueKey(currentStep),
-                    title: _stepTitle(currentStep),
-                    subtitle: _stepSubtitle(currentStep),
-                    child: _buildStepContent(),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                Row(
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter): () {
+          if (currentStep == 3) {
+            _submit();
+          } else {
+            _nextStep();
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): () {
+          if (currentStep == 3) {
+            _submit();
+          } else {
+            _nextStep();
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+          if (currentStep < 3) {
+            _nextStep();
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+          if (currentStep > 0) {
+            _previousStep();
+          }
+        },
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (currentStep > 0) {
+            _previousStep();
+          } else if (Navigator.of(context).canPop()) {
+            Navigator.of(context).maybePop();
+          }
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: const Color(0xFFF5F8FC),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFF8FBFB), AppColors.background],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (currentStep > 0)
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: _previousStep,
-                          child: const Text("Back"),
-                        ),
+                    _buildHeroCard(),
+                    const SizedBox(height: 20),
+                    _StepIndicator(currentStep: currentStep),
+                    const SizedBox(height: 20),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 220),
+                      child: _StepPage(
+                        key: ValueKey(currentStep),
+                        title: _stepTitle(currentStep),
+                        subtitle: _stepSubtitle(currentStep),
+                        child: _buildStepContent(),
                       ),
-                    if (currentStep > 0) const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: currentStep == 2 ? _submit : _nextStep,
-                        child: Text(
-                          currentStep == 2 ? "Submit application" : "Continue",
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      children: [
+                        if (currentStep > 0)
+                          Expanded(
+                            child: OutlinedButton(
+                              onPressed: _previousStep,
+                              child: const Text("Back"),
+                            ),
+                          ),
+                        if (currentStep > 0) const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: currentStep == 3 ? _submit : _nextStep,
+                            child: Text(
+                              currentStep == 3
+                                  ? "Submit application"
+                                  : "Continue",
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
@@ -410,6 +442,8 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         return "Professional credentials";
       case 2:
         return "Clinic details";
+      case 3:
+        return "SMS OTP verification";
       default:
         return "Account setup";
     }
@@ -421,6 +455,8 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         return "Add your registration and licence details for admin review.";
       case 2:
         return "Tell patients where you practice and how to contact you.";
+      case 3:
+        return "Verify your phone number before submitting your registration.";
       default:
         return "Start with your login credentials and basic identity details.";
     }
@@ -481,9 +517,11 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
               phone,
               "Phone number",
               keyboardType: TextInputType.phone,
+              onChanged: (_) => _resetOtpVerification(),
             ),
             _buildField(clinicName, "Clinic name"),
             _buildField(clinicAddress, "Clinic address", maxLines: 3),
+            _buildField(bio, "Bio (optional)", maxLines: 4),
             const SizedBox(height: 4),
             _MapSelectionHint(label: _clinicLocationLabel),
             const SizedBox(height: 12),
@@ -540,6 +578,8 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
             ),
           ],
         );
+      case 3:
+        return _buildOtpVerificationStep();
       default:
         return Column(
           children: [
@@ -564,6 +604,7 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     bool obscure = false,
     bool readOnly = false,
     VoidCallback? onTap,
+    ValueChanged<String>? onChanged,
     int maxLines = 1,
     Widget? suffixIcon,
     TextInputType? keyboardType,
@@ -575,6 +616,16 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
         obscureText: obscure,
         readOnly: readOnly,
         onTap: onTap,
+        onChanged: onChanged,
+        onFieldSubmitted: (_) {
+          if (currentStep == 3 && identical(controller, otp)) {
+            _verifyOtp();
+          } else if (currentStep == 3) {
+            _submit();
+          } else {
+            _nextStep();
+          }
+        },
         maxLines: maxLines,
         keyboardType: keyboardType,
         decoration: InputDecoration(labelText: label, suffixIcon: suffixIcon),
@@ -616,6 +667,277 @@ class _DoctorRegistrationScreenState extends State<DoctorRegistrationScreen> {
     );
   }
 
+  Widget _buildOtpVerificationStep() {
+    final phoneNumber = _normalizedPhoneNumber;
+    final phoneChangedAfterVerify =
+        _otpVerified && _verifiedPhoneNumber != phoneNumber;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FBFD),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                "Verify mobile number",
+                style: TextStyle(
+                  color: AppColors.darkText,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                phoneNumber.isEmpty
+                    ? "Complete the clinic step first to send the OTP."
+                    : "We will send an SMS OTP to $phoneNumber.",
+                style: const TextStyle(
+                  color: AppColors.mutedText,
+                  height: 1.5,
+                ),
+              ),
+              if (_otpVerified && !phoneChangedAfterVerify) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  "Phone number verified successfully.",
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+              if (phoneChangedAfterVerify) ...[
+                const SizedBox(height: 10),
+                const Text(
+                  "Phone number changed. Please request a new OTP.",
+                  style: TextStyle(
+                    color: Colors.deepOrange,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        _buildField(
+          otp,
+          "Enter SMS OTP",
+          keyboardType: TextInputType.number,
+        ),
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _sendingOtp ? null : _sendOtp,
+                icon: _sendingOtp
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sms_outlined),
+                label: Text(_otpSent ? "Resend OTP" : "Send OTP"),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _verifyingOtp ? null : _verifyOtp,
+                child: _verifyingOtp
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Text("Verify OTP"),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  String get _normalizedPhoneNumber {
+    final raw = phone.text.trim();
+    if (raw.isEmpty) return raw;
+
+    final digitsOnly = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    if (raw.startsWith('+')) {
+      return '+$digitsOnly';
+    }
+    if (digitsOnly.length == 10) {
+      return '+91$digitsOnly';
+    }
+    if (digitsOnly.length == 12 && digitsOnly.startsWith('91')) {
+      return '+$digitsOnly';
+    }
+    return '+$digitsOnly';
+  }
+
+  Future<void> _sendOtp() async {
+    if (!_validateClinicStep()) return;
+
+    final phoneNumber = _normalizedPhoneNumber;
+    if (phoneNumber.length < 11) {
+      _showMessage("Enter a valid phone number before requesting OTP.");
+      return;
+    }
+
+    setState(() {
+      _sendingOtp = true;
+      _otpVerified = false;
+      _verifiedPhoneNumber = null;
+      _confirmationResult = null;
+    });
+
+    try {
+      if (kIsWeb) {
+        final confirmationResult = await FirebaseAuth.instance
+            .signInWithPhoneNumber(phoneNumber);
+        if (!mounted) return;
+        setState(() {
+          _confirmationResult = confirmationResult;
+          _otpSent = true;
+          _sendingOtp = false;
+        });
+        _showMessage("SMS OTP sent to $phoneNumber.");
+        return;
+      }
+
+      await FirebaseAuth.instance.verifyPhoneNumber(
+        phoneNumber: phoneNumber,
+        timeout: const Duration(seconds: 60),
+        forceResendingToken: _otpSent ? _resendToken : null,
+        verificationCompleted: (PhoneAuthCredential credential) async {
+          try {
+            await FirebaseAuth.instance.signInWithCredential(credential);
+            if (!mounted) return;
+            setState(() {
+              _otpVerified = true;
+              _verifiedPhoneNumber = phoneNumber;
+            });
+            _showMessage("Phone number verified successfully.");
+          } catch (error) {
+            if (!mounted) return;
+            _showMessage("Auto verification failed. ${error.toString()}");
+          }
+        },
+        verificationFailed: (FirebaseAuthException error) {
+          if (!mounted) return;
+          setState(() {
+            _sendingOtp = false;
+          });
+          _showMessage(error.message ?? "Could not send OTP.");
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          if (!mounted) return;
+          setState(() {
+            _verificationId = verificationId;
+            _resendToken = resendToken;
+            _otpSent = true;
+            _sendingOtp = false;
+          });
+          _showMessage("SMS OTP sent to $phoneNumber.");
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          if (!mounted) return;
+          setState(() {
+            _verificationId = verificationId;
+            _sendingOtp = false;
+          });
+        },
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _sendingOtp = false;
+      });
+      _showMessage("Could not send OTP. ${error.toString()}");
+    }
+  }
+
+  Future<void> _verifyOtp() async {
+    final trimmedOtp = otp.text.trim();
+    if (trimmedOtp.length < 6) {
+      _showMessage("Enter the 6-digit OTP.");
+      return;
+    }
+    if (kIsWeb) {
+      if (_confirmationResult == null) {
+        _showMessage("Request an OTP first.");
+        return;
+      }
+    } else if (_verificationId == null || _verificationId!.isEmpty) {
+      _showMessage("Request an OTP first.");
+      return;
+    }
+
+    setState(() {
+      _verifyingOtp = true;
+    });
+
+    try {
+      if (kIsWeb) {
+        await _confirmationResult!.confirm(trimmedOtp);
+      } else {
+        final credential = PhoneAuthProvider.credential(
+          verificationId: _verificationId!,
+          smsCode: trimmedOtp,
+        );
+        await FirebaseAuth.instance.signInWithCredential(credential);
+      }
+      if (!mounted) return;
+      await FirebaseAuth.instance.signOut();
+      setState(() {
+        _otpVerified = true;
+        _verifiedPhoneNumber = _normalizedPhoneNumber;
+      });
+      _showMessage("Phone number verified successfully.");
+    } on FirebaseAuthException catch (error) {
+      _showMessage(error.message ?? "Invalid OTP. Please try again.");
+    } catch (error) {
+      _showMessage("Could not verify OTP. ${error.toString()}");
+    } finally {
+      if (mounted) {
+        setState(() {
+          _verifyingOtp = false;
+        });
+      }
+    }
+  }
+
+  void _resetOtpVerification() {
+    if (!_otpSent &&
+        !_otpVerified &&
+        _verificationId == null &&
+        _resendToken == null &&
+        otp.text.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _verificationId = null;
+      _confirmationResult = null;
+      _resendToken = null;
+      _otpSent = false;
+      _otpVerified = false;
+      _verifiedPhoneNumber = null;
+      otp.clear();
+    });
+  }
+
   String get _clinicLocationLabel {
     if (selectedLatitude == null || selectedLongitude == null) {
       return "Tap the map to pin your clinic location";
@@ -632,7 +954,7 @@ class _StepIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const labels = ["Account", "Professional", "Clinic"];
+    const labels = ["Account", "Professional", "Clinic", "OTP"];
 
     return Row(
       children: List.generate(labels.length, (index) {

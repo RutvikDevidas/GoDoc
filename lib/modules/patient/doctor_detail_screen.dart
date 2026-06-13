@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:flutter_map/flutter_map.dart';
@@ -71,7 +70,7 @@ class DoctorDetailScreen extends StatelessWidget {
                       color: Colors.white,
                     ),
                     style: IconButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.16),
+                      backgroundColor: Colors.white.withValues(alpha: 0.16),
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -81,7 +80,7 @@ class DoctorDetailScreen extends StatelessWidget {
                         width: 84,
                         height: 84,
                         decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.16),
+                          color: Colors.white.withValues(alpha: 0.16),
                           borderRadius: BorderRadius.circular(26),
                         ),
                         clipBehavior: Clip.antiAlias,
@@ -387,9 +386,9 @@ class _InfoPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.14),
+        color: Colors.white.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -490,8 +489,8 @@ class _ClinicMapPreviewState extends State<_ClinicMapPreview> {
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
                   colors: [
-                    Colors.black.withOpacity(0.0),
-                    Colors.black.withOpacity(0.35),
+                    Colors.black.withValues(alpha: 0.0),
+                    Colors.black.withValues(alpha: 0.35),
                   ],
                 ),
               ),
@@ -510,7 +509,7 @@ class _ClinicMapPreviewState extends State<_ClinicMapPreview> {
               child: Text(
                 "Tap to view route",
                 style: TextStyle(
-                  color: Colors.white.withOpacity(0.9),
+                  color: Colors.white.withValues(alpha: 0.9),
                   fontWeight: FontWeight.w700,
                 ),
               ),

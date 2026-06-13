@@ -1,8 +1,9 @@
-import 'package:flutter/material.dart';
 import 'dart:convert';
 
+import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+
 import '../../core/constants/app_colors.dart';
 import '../../core/firebase/firestore_data_service.dart';
 import '../../models/doctor_model.dart';
@@ -38,7 +39,8 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
   double? _selectedLatitude;
   double? _selectedLongitude;
 
-  late List<DoctorAvailability> availability;
+  late List<DoctorWeeklyAvailability> weeklyAvailability;
+  late List<DoctorAvailability> availabilityOverrides;
 
   @override
   void initState() {
@@ -59,14 +61,24 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     _selectedLatitude = widget.doctor.clinicLatitude;
     _selectedLongitude = widget.doctor.clinicLongitude;
 
-    availability = widget.doctor.availability
+    weeklyAvailability = widget.doctor.weeklyAvailability
         .map(
-          (slot) => DoctorAvailability(
-            date: slot.date,
+          (slot) => DoctorWeeklyAvailability(
+            weekday: slot.weekday,
             timeSlots: List<String>.from(slot.timeSlots),
           ),
         )
         .toList();
+    availabilityOverrides =
+        widget.doctor.availabilityOverrides
+            .map(
+              (slot) => DoctorAvailability(
+                date: slot.date,
+                timeSlots: List<String>.from(slot.timeSlots),
+              ),
+            )
+            .toList()
+          ..sort((a, b) => a.date.compareTo(b.date));
   }
 
   @override
@@ -104,7 +116,15 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     widget.doctor.consultationFee =
         double.tryParse(consultationFee.text.trim()) ??
         widget.doctor.consultationFee;
-    widget.doctor.availability = availability
+    widget.doctor.weeklyAvailability = weeklyAvailability
+        .map(
+          (slot) => DoctorWeeklyAvailability(
+            weekday: slot.weekday,
+            timeSlots: List<String>.from(slot.timeSlots),
+          ),
+        )
+        .toList();
+    widget.doctor.availabilityOverrides = availabilityOverrides
         .map(
           (slot) => DoctorAvailability(
             date: slot.date,
@@ -112,6 +132,7 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
           ),
         )
         .toList();
+    widget.doctor.refreshAvailability();
 
     await FirestoreDataService.instance.saveDoctor(widget.doctor);
     await FirestoreDataService.instance.syncAllToAppState();
@@ -154,7 +175,86 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     });
   }
 
-  Future<void> _addAvailabilityDay() async {
+  Future<void> _addWeeklyAvailabilityDay() async {
+    final usedDays = weeklyAvailability.map((slot) => slot.weekday).toSet();
+    final availableDays = List<int>.generate(
+      7,
+      (index) => index + 1,
+    ).where((weekday) => !usedDays.contains(weekday)).toList();
+
+    if (availableDays.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("All weekdays are already added.")),
+      );
+      return;
+    }
+
+    final pickedWeekday = await showDialog<int>(
+      context: context,
+      builder: (context) {
+        return SimpleDialog(
+          title: const Text("Choose weekday"),
+          children: availableDays
+              .map(
+                (weekday) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(context, weekday),
+                  child: Text(_weekdayLabel(weekday)),
+                ),
+              )
+              .toList(),
+        );
+      },
+    );
+
+    if (pickedWeekday == null) return;
+
+    setState(() {
+      weeklyAvailability.add(
+        DoctorWeeklyAvailability(weekday: pickedWeekday, timeSlots: <String>[]),
+      );
+      weeklyAvailability = normalizeWeeklyAvailability(weeklyAvailability);
+    });
+  }
+
+  Future<void> _addWeeklyTimeSlot(int index) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: const TimeOfDay(hour: 10, minute: 0),
+    );
+    if (picked == null) return;
+
+    setState(() {
+      final updatedSlots = List<String>.from(
+        weeklyAvailability[index].timeSlots,
+      )..add(picked.format(context));
+      weeklyAvailability[index] = DoctorWeeklyAvailability(
+        weekday: weeklyAvailability[index].weekday,
+        timeSlots: updatedSlots,
+      );
+      weeklyAvailability = normalizeWeeklyAvailability(weeklyAvailability);
+    });
+  }
+
+  void _removeWeeklyAvailabilityDay(int index) {
+    setState(() {
+      weeklyAvailability.removeAt(index);
+    });
+  }
+
+  void _removeWeeklyTimeSlot(int dayIndex, int slotIndex) {
+    setState(() {
+      final updatedSlots = List<String>.from(
+        weeklyAvailability[dayIndex].timeSlots,
+      )..removeAt(slotIndex);
+      weeklyAvailability[dayIndex] = DoctorWeeklyAvailability(
+        weekday: weeklyAvailability[dayIndex].weekday,
+        timeSlots: updatedSlots,
+      );
+      weeklyAvailability = normalizeWeeklyAvailability(weeklyAvailability);
+    });
+  }
+
+  Future<void> _addSpecificDateOverride() async {
     final picked = await showDatePicker(
       context: context,
       initialDate: DateTime.now().add(const Duration(days: 1)),
@@ -163,18 +263,30 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     );
     if (picked == null) return;
 
+    final date = DateTime(picked.year, picked.month, picked.day);
+    final existingIndex = availabilityOverrides.indexWhere(
+      (slot) => _isSameCalendarDay(slot.date, date),
+    );
+    if (existingIndex >= 0) return;
+
+    final baseSlots =
+        weeklyAvailability
+            .where((slot) => slot.weekday == date.weekday)
+            .firstOrNull
+            ?.timeSlots ??
+        const <String>[];
+
     setState(() {
-      availability.add(
-        DoctorAvailability(
-          date: DateTime(picked.year, picked.month, picked.day),
-          timeSlots: <String>[],
-        ),
+      availabilityOverrides.add(
+        DoctorAvailability(date: date, timeSlots: List<String>.from(baseSlots)),
       );
-      availability.sort((a, b) => a.date.compareTo(b.date));
+      availabilityOverrides = normalizeAvailabilityOverrides(
+        availabilityOverrides,
+      );
     });
   }
 
-  Future<void> _addTimeSlot(int index) async {
+  Future<void> _addOverrideTimeSlot(int index) async {
     final picked = await showTimePicker(
       context: context,
       initialTime: const TimeOfDay(hour: 10, minute: 0),
@@ -182,24 +294,72 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
     if (picked == null) return;
 
     setState(() {
-      availability[index].timeSlots.add(picked.format(context));
+      final updatedSlots = List<String>.from(
+        availabilityOverrides[index].timeSlots,
+      )..add(picked.format(context));
+      availabilityOverrides[index] = DoctorAvailability(
+        date: availabilityOverrides[index].date,
+        timeSlots: updatedSlots,
+      );
+      availabilityOverrides = normalizeAvailabilityOverrides(
+        availabilityOverrides,
+      );
     });
   }
 
-  void _removeAvailabilityDay(int index) {
+  void _removeOverrideDate(int index) {
     setState(() {
-      availability.removeAt(index);
+      availabilityOverrides.removeAt(index);
     });
   }
 
-  void _removeTimeSlot(int dayIndex, int slotIndex) {
+  void _removeOverrideTimeSlot(int dayIndex, int slotIndex) {
     setState(() {
-      availability[dayIndex].timeSlots.removeAt(slotIndex);
+      final updatedSlots = List<String>.from(
+        availabilityOverrides[dayIndex].timeSlots,
+      )..removeAt(slotIndex);
+      availabilityOverrides[dayIndex] = DoctorAvailability(
+        date: availabilityOverrides[dayIndex].date,
+        timeSlots: updatedSlots,
+      );
+      availabilityOverrides = normalizeAvailabilityOverrides(
+        availabilityOverrides,
+      );
     });
+  }
+
+  bool _isSameCalendarDay(DateTime first, DateTime second) {
+    return first.year == second.year &&
+        first.month == second.month &&
+        first.day == second.day;
+  }
+
+  String _weekdayLabel(int weekday) {
+    const labels = <int, String>{
+      DateTime.monday: 'Monday',
+      DateTime.tuesday: 'Tuesday',
+      DateTime.wednesday: 'Wednesday',
+      DateTime.thursday: 'Thursday',
+      DateTime.friday: 'Friday',
+      DateTime.saturday: 'Saturday',
+      DateTime.sunday: 'Sunday',
+    };
+
+    return labels[weekday] ?? 'Day';
+  }
+
+  List<DoctorAvailability> get _generatedPreview {
+    return buildUpcomingAvailability(
+      weeklyAvailability: weeklyAvailability,
+      availabilityOverrides: availabilityOverrides,
+      horizonDays: 14,
+    );
   }
 
   @override
   Widget build(BuildContext context) {
+    final generatedPreview = _generatedPreview;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FC),
       appBar: AppBar(
@@ -240,7 +400,8 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                       username,
                       "Username",
                       readOnly: true,
-                      helperText: "Username cannot be changed after registration.",
+                      helperText:
+                          "Username cannot be changed after registration.",
                     ),
                     _buildField(specialization, "Specialization"),
                     _buildField(
@@ -285,13 +446,6 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                         decimal: true,
                       ),
                     ),
-                    _buildField(
-                      upiId,
-                      "UPI ID",
-                      extraValidator: (value) => _upiPattern.hasMatch(value)
-                          ? null
-                          : "Enter a valid UPI ID",
-                    ),
                   ],
                 ),
               ),
@@ -306,11 +460,24 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    if (availability.isEmpty)
+                    const Text(
+                      "Set your weekly working days once. Upcoming dates are created automatically, and you can still customize any one date when needed.",
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      "Weekly schedule",
+                      style: TextStyle(
+                        color: AppColors.darkText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (weeklyAvailability.isEmpty)
                       const Padding(
                         padding: EdgeInsets.only(bottom: 12),
                         child: Text(
-                          "No schedule added yet. Add an available day to get started.",
+                          "No weekly schedule added yet. Add the weekdays you usually work.",
                           style: TextStyle(
                             color: AppColors.mutedText,
                             height: 1.5,
@@ -318,23 +485,89 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                         ),
                       )
                     else
-                      ...availability.asMap().entries.map(
+                      ...weeklyAvailability.asMap().entries.map(
                         (entry) => Padding(
                           padding: const EdgeInsets.only(bottom: 12),
-                          child: _AvailabilityEditorCard(
-                            availability: entry.value,
-                            onAddSlot: () => _addTimeSlot(entry.key),
+                          child: _WeeklyAvailabilityEditorCard(
+                            label: _weekdayLabel(entry.value.weekday),
+                            timeSlots: entry.value.timeSlots,
+                            onAddSlot: () => _addWeeklyTimeSlot(entry.key),
                             onRemoveDay: () =>
-                                _removeAvailabilityDay(entry.key),
+                                _removeWeeklyAvailabilityDay(entry.key),
                             onRemoveSlot: (slotIndex) =>
-                                _removeTimeSlot(entry.key, slotIndex),
+                                _removeWeeklyTimeSlot(entry.key, slotIndex),
                           ),
                         ),
                       ),
                     OutlinedButton(
-                      onPressed: _addAvailabilityDay,
-                      child: const Text("Add available day"),
+                      onPressed: _addWeeklyAvailabilityDay,
+                      child: const Text("Add weekly day"),
                     ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      "Specific date changes",
+                      style: TextStyle(
+                        color: AppColors.darkText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      "Use this only when one date needs different times or a day off.",
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
+                    ),
+                    const SizedBox(height: 12),
+                    if (availabilityOverrides.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          "No specific date changes added yet.",
+                          style: TextStyle(color: AppColors.mutedText),
+                        ),
+                      )
+                    else
+                      ...availabilityOverrides.asMap().entries.map(
+                        (entry) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _DateAvailabilityEditorCard(
+                            availability: entry.value,
+                            onAddSlot: () => _addOverrideTimeSlot(entry.key),
+                            onRemoveDay: () => _removeOverrideDate(entry.key),
+                            onRemoveSlot: (slotIndex) =>
+                                _removeOverrideTimeSlot(entry.key, slotIndex),
+                          ),
+                        ),
+                      ),
+                    OutlinedButton(
+                      onPressed: _addSpecificDateOverride,
+                      child: const Text("Customize specific date"),
+                    ),
+                    const SizedBox(height: 20),
+                    const Text(
+                      "Upcoming preview",
+                      style: TextStyle(
+                        color: AppColors.darkText,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    if (generatedPreview.isEmpty)
+                      const Text(
+                        "No upcoming slots will be shown to patients until you add a weekly day or date override.",
+                        style: TextStyle(
+                          color: AppColors.mutedText,
+                          height: 1.5,
+                        ),
+                      )
+                    else
+                      ...generatedPreview
+                          .take(6)
+                          .map(
+                            (slot) => Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: _SchedulePreviewRow(availability: slot),
+                            ),
+                          ),
                   ],
                 ),
               ),
@@ -346,10 +579,7 @@ class _DoctorEditProfileScreenState extends State<DoctorEditProfileScreen> {
                   children: [
                     const Text(
                       "Add only the UPI ID patients should use while booking an online consultation.",
-                      style: TextStyle(
-                        color: AppColors.mutedText,
-                        height: 1.5,
-                      ),
+                      style: TextStyle(color: AppColors.mutedText, height: 1.5),
                     ),
                     const SizedBox(height: 16),
                     _buildField(
@@ -464,13 +694,87 @@ class _ProfileAvatar extends StatelessWidget {
   }
 }
 
-class _AvailabilityEditorCard extends StatelessWidget {
+class _WeeklyAvailabilityEditorCard extends StatelessWidget {
+  final String label;
+  final List<String> timeSlots;
+  final VoidCallback onAddSlot;
+  final VoidCallback onRemoveDay;
+  final ValueChanged<int> onRemoveSlot;
+
+  const _WeeklyAvailabilityEditorCard({
+    required this.label,
+    required this.timeSlots,
+    required this.onAddSlot,
+    required this.onRemoveDay,
+    required this.onRemoveSlot,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FBFD),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(
+                    color: AppColors.darkText,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              IconButton(
+                onPressed: onRemoveDay,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (timeSlots.isEmpty)
+            const Text(
+              "No time slots added yet.",
+              style: TextStyle(color: AppColors.mutedText),
+            )
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: timeSlots.asMap().entries.map((entry) {
+                return Chip(
+                  label: Text(entry.value),
+                  deleteIcon: const Icon(Icons.close_rounded, size: 18),
+                  onDeleted: () => onRemoveSlot(entry.key),
+                );
+              }).toList(),
+            ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: onAddSlot,
+            child: const Text("Add time slot"),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _DateAvailabilityEditorCard extends StatelessWidget {
   final DoctorAvailability availability;
   final VoidCallback onAddSlot;
   final VoidCallback onRemoveDay;
   final ValueChanged<int> onRemoveSlot;
 
-  const _AvailabilityEditorCard({
+  const _DateAvailabilityEditorCard({
     required this.availability,
     required this.onAddSlot,
     required this.onRemoveDay,
@@ -510,8 +814,8 @@ class _AvailabilityEditorCard extends StatelessWidget {
           const SizedBox(height: 10),
           if (availability.timeSlots.isEmpty)
             const Text(
-              "No time slots added yet.",
-              style: TextStyle(color: AppColors.mutedText),
+              "No time slots. Leave it empty if you want this day blocked off.",
+              style: TextStyle(color: AppColors.mutedText, height: 1.4),
             )
           else
             Wrap(
@@ -534,4 +838,51 @@ class _AvailabilityEditorCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SchedulePreviewRow extends StatelessWidget {
+  final DoctorAvailability availability;
+
+  const _SchedulePreviewRow({required this.availability});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.accent,
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 78,
+            child: Text(
+              DateFormat('dd MMM').format(availability.date),
+              style: const TextStyle(
+                color: AppColors.primary,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              availability.timeSlots.join(' | '),
+              style: const TextStyle(
+                color: AppColors.darkText,
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+extension<T> on Iterable<T> {
+  T? get firstOrNull => isEmpty ? null : first;
 }

@@ -2,7 +2,9 @@ import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../../core/constants/app_colors.dart';
 import '../../core/firebase/firestore_data_service.dart';
 import '../../models/patient_model.dart';
@@ -76,7 +78,6 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
 
     try {
       try {
-        // Check whether the entered username already exists.
         final usernameTaken = await FirestoreDataService.instance
             .usernameExists(username.text.trim())
             .timeout(const Duration(seconds: 8));
@@ -91,12 +92,10 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
           return;
         }
       } catch (error) {
-        // If Firebase is unavailable, continue with local save
-        print('Error checking username: $error');
+        debugPrint('Error checking username: $error');
       }
 
       try {
-        // Save the patient using the existing controllers and image state.
         await FirebaseFirestore.instance
             .collection("GODOC-app")
             .doc("data")
@@ -112,23 +111,24 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
               "phone": phone.text.trim(),
               "profileImagePath": null,
               "profileImageData": profileImageData,
-              "medicalReports": <Map<String, dynamic>>[],
               "createdAt": FieldValue.serverTimestamp(),
               "updatedAt": FieldValue.serverTimestamp(),
             })
             .timeout(const Duration(seconds: 8));
+
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text("Patient data saved successfully.")),
           );
         }
+
         try {
           await FirestoreDataService.instance.syncAllToAppState().timeout(
             const Duration(seconds: 8),
           );
         } catch (_) {}
       } catch (error) {
-        print('Error saving to Firebase: $error');
+        debugPrint('Error saving to Firebase: $error');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
@@ -141,7 +141,7 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
 
       if (!mounted) return;
 
-      final patient2 = PatientModel(
+      final patient = PatientModel(
         username: username.text.trim(),
         password: password.text.trim(),
         name: name.text.trim(),
@@ -154,11 +154,11 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
 
       Navigator.pushAndRemoveUntil(
         context,
-        MaterialPageRoute(builder: (_) => PatientHomeScreen(patient: patient2)),
+        MaterialPageRoute(builder: (_) => PatientHomeScreen(patient: patient)),
         (route) => false,
       );
     } catch (error) {
-      print('Unexpected error in registration: $error');
+      debugPrint('Unexpected error in registration: $error');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -177,135 +177,160 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F8FC),
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF8FBFB), AppColors.background],
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeroCard(),
-                const SizedBox(height: 20),
-                Form(
-                  key: _formKey,
-                  child: Container(
-                    padding: const EdgeInsets.all(24),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(30),
-                      border: Border.all(color: AppColors.border),
-                      boxShadow: const [
-                        BoxShadow(
-                          color: Color(0x0D0F172A),
-                          blurRadius: 18,
-                          offset: Offset(0, 10),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter): _register,
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): _register,
+        const SingleActivator(LogicalKeyboardKey.escape): _handleBack,
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          backgroundColor: const Color(0xFFF5F8FC),
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFF8FBFB), AppColors.background],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+              ),
+            ),
+            child: SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeroCard(),
+                    const SizedBox(height: 20),
+                    Form(
+                      key: _formKey,
+                      child: Container(
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(30),
+                          border: Border.all(color: AppColors.border),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x0D0F172A),
+                              blurRadius: 18,
+                              offset: Offset(0, 10),
+                            ),
+                          ],
                         ),
-                      ],
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Center(
+                              child: GestureDetector(
+                                onTap: _pickImage,
+                                child: _ProfilePicker(
+                                  imageData: profileImageData,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 24),
+                            const Text(
+                              "Personal details",
+                              style: TextStyle(
+                                color: AppColors.darkText,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            _buildField(name, "Full name"),
+                            _buildField(
+                              dob,
+                              "Date of birth",
+                              readOnly: true,
+                              onTap: _pickDate,
+                              suffixIcon: const Icon(
+                                Icons.calendar_today_rounded,
+                              ),
+                            ),
+                            _buildField(address, "Address", maxLines: 3),
+                            _buildField(
+                              email,
+                              "Email",
+                              keyboardType: TextInputType.emailAddress,
+                              extraValidator: (value) {
+                                return _emailPattern.hasMatch(value)
+                                    ? null
+                                    : "Enter a valid email";
+                              },
+                            ),
+                            _buildField(
+                              phone,
+                              "Phone number",
+                              keyboardType: TextInputType.phone,
+                              extraValidator: (value) {
+                                return _phonePattern.hasMatch(value)
+                                    ? null
+                                    : "Enter a valid phone number";
+                              },
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              "Account setup",
+                              style: TextStyle(
+                                color: AppColors.darkText,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            _buildField(
+                              username,
+                              "Username",
+                              extraValidator: (value) {
+                                return _usernamePattern.hasMatch(value)
+                                    ? null
+                                    : "Use 4-20 letters, numbers, or _";
+                              },
+                            ),
+                            _buildField(
+                              password,
+                              "Password",
+                              obscure: true,
+                              extraValidator: (value) {
+                                return value.length >= 6
+                                    ? null
+                                    : "Password must be at least 6 characters";
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            ElevatedButton(
+                              onPressed: _isLoading ? null : _register,
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                      ),
+                                    )
+                                  : const Text("Create patient account"),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                          child: GestureDetector(
-                            onTap: _pickImage,
-                            child: _ProfilePicker(imageData: profileImageData),
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        const Text(
-                          "Personal details",
-                          style: TextStyle(
-                            color: AppColors.darkText,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildField(name, "Full name"),
-                        _buildField(
-                          dob,
-                          "Date of birth",
-                          readOnly: true,
-                          onTap: _pickDate,
-                          suffixIcon: const Icon(Icons.calendar_today_rounded),
-                        ),
-                        _buildField(address, "Address", maxLines: 3),
-                        _buildField(
-                          email,
-                          "Email",
-                          keyboardType: TextInputType.emailAddress,
-                          extraValidator: (value) =>
-                              _emailPattern.hasMatch(value)
-                              ? null
-                              : "Enter a valid email",
-                        ),
-                        _buildField(
-                          phone,
-                          "Phone number",
-                          keyboardType: TextInputType.phone,
-                          extraValidator: (value) =>
-                              _phonePattern.hasMatch(value)
-                              ? null
-                              : "Enter a valid phone number",
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          "Account setup",
-                          style: TextStyle(
-                            color: AppColors.darkText,
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildField(
-                          username,
-                          "Username",
-                          extraValidator: (value) =>
-                              _usernamePattern.hasMatch(value)
-                              ? null
-                              : "Use 4-20 letters, numbers, or _",
-                        ),
-                        _buildField(
-                          password,
-                          "Password",
-                          obscure: true,
-                          extraValidator: (value) => value.length >= 6
-                              ? null
-                              : "Password must be at least 6 characters",
-                        ),
-                        const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed: _isLoading ? null : _register,
-                          child: _isLoading
-                              ? const SizedBox(
-                                  height: 20,
-                                  width: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                  ),
-                                )
-                              : const Text("Create patient account"),
-                        ),
-                      ],
-                    ),
-                  ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  void _handleBack() {
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).maybePop();
+    }
   }
 
   Widget _buildHeroCard() {
@@ -363,6 +388,7 @@ class _PatientRegistrationScreenState extends State<PatientRegistrationScreen> {
         obscureText: obscure,
         readOnly: readOnly,
         onTap: onTap,
+        onFieldSubmitted: (_) => _register(),
         maxLines: maxLines,
         keyboardType: keyboardType,
         validator: (value) {

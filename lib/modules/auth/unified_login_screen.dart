@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/constants/app_colors.dart';
 import '../../core/data/app_state.dart';
 import '../../core/data/demo_seed_data.dart';
 import '../../core/firebase/firestore_data_service.dart';
+import '../../core/session/session_manager.dart';
 import '../../models/doctor_model.dart';
 import '../../models/patient_model.dart';
 import '../admin/admin_dashboard.dart';
@@ -65,6 +67,10 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
     if (!mounted) return;
 
     if (isAdmin) {
+      await SessionManager.saveSession(
+        AppSession(role: AppSessionRole.admin, username: user),
+      );
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const AdminDashboard()),
@@ -112,6 +118,13 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
         orElse: () => resolvedDoctor,
       );
 
+      await SessionManager.saveSession(
+        AppSession(
+          role: AppSessionRole.doctor,
+          username: syncedDoctor.username,
+        ),
+      );
+      if (!mounted) return;
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(
@@ -153,6 +166,13 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
       orElse: () => resolvedPatient,
     );
 
+    await SessionManager.saveSession(
+      AppSession(
+        role: AppSessionRole.patient,
+        username: syncedPatient.username,
+      ),
+    );
+    if (!mounted) return;
     Navigator.pushReplacement(
       context,
       MaterialPageRoute(
@@ -172,47 +192,76 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
     );
   }
 
+  void _selectPortal(bool doctor) {
+    if (isDoctor == doctor) return;
+    setState(() {
+      isDoctor = doctor;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFFF5FBFA), Color(0xFFE8F3F5)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Stack(
-          children: [
-            Positioned(
-              top: -80,
-              left: -40,
-              child: _GlowCircle(
-                size: 220,
-                color: AppColors.secondary.withOpacity(0.18),
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.enter): () {
+          login();
+        },
+        const SingleActivator(LogicalKeyboardKey.numpadEnter): () {
+          login();
+        },
+        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
+            _selectPortal(false),
+        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
+            _selectPortal(true),
+        const SingleActivator(LogicalKeyboardKey.escape): () {
+          if (Navigator.of(context).canPop()) {
+            Navigator.of(context).maybePop();
+          }
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFFF5FBFA), Color(0xFFE8F3F5)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
-            Positioned(
-              right: -70,
-              bottom: 100,
-              child: _GlowCircle(
-                size: 260,
-                color: AppColors.primary.withOpacity(0.12),
-              ),
-            ),
-            SafeArea(
-              child: Center(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 520),
-                    child: _buildLoginCard(),
+            child: Stack(
+              children: [
+                Positioned(
+                  top: -80,
+                  left: -40,
+                  child: _GlowCircle(
+                    size: 220,
+                    color: AppColors.secondary.withValues(alpha: 0.18),
                   ),
                 ),
-              ),
+                Positioned(
+                  right: -70,
+                  bottom: 100,
+                  child: _GlowCircle(
+                    size: 260,
+                    color: AppColors.primary.withValues(alpha: 0.12),
+                  ),
+                ),
+                SafeArea(
+                  child: Center(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.all(24),
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 520),
+                        child: _buildLoginCard(),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -226,7 +275,7 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
         return Container(
           padding: EdgeInsets.all(compact ? 20 : 28),
           decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.96),
+            color: Colors.white.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(compact ? 24 : 32),
             border: Border.all(color: Colors.white),
             boxShadow: const [
@@ -324,6 +373,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
               const SizedBox(height: 22),
               TextField(
                 controller: username,
+                onSubmitted: (_) {
+                  login();
+                },
                 decoration: const InputDecoration(
                   labelText: "Username",
                   prefixIcon: Icon(Icons.person_outline_rounded),
@@ -333,6 +385,9 @@ class _UnifiedLoginScreenState extends State<UnifiedLoginScreen> {
               TextField(
                 controller: password,
                 obscureText: !isPasswordVisible,
+                onSubmitted: (_) {
+                  login();
+                },
                 decoration: InputDecoration(
                   labelText: "Password",
                   prefixIcon: const Icon(Icons.lock_outline_rounded),

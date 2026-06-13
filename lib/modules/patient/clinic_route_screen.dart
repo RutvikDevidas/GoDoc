@@ -38,15 +38,9 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
   bool _loading = true;
   bool _routeLoading = false;
   bool _usingFallbackRoute = false;
-  bool _locationPermissionGranted = false;
   bool _permissionPermanentlyDenied = false;
   double? _routeDistanceMeters;
   double? _routeDurationSeconds;
-
-  bool _hasLocationPermission(LocationPermission permission) {
-    return permission == LocationPermission.always ||
-        permission == LocationPermission.whileInUse;
-  }
 
   @override
   void initState() {
@@ -71,7 +65,6 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       final position = await _determinePosition();
       setState(() {
         _userPosition = position;
-        _locationPermissionGranted = true;
       });
       await _loadCurrentLocationAddress(position);
       await _loadBestRoute();
@@ -80,12 +73,13 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     } catch (e) {
       setState(() {
         _error = e.toString();
-        _locationPermissionGranted = false;
       });
     } finally {
-      setState(() {
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -99,20 +93,16 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
       if (permission == LocationPermission.denied) {
-        _locationPermissionGranted = false;
         throw Exception('Location permissions are denied');
       }
     }
 
     if (permission == LocationPermission.deniedForever) {
       _permissionPermanentlyDenied = true;
-      _locationPermissionGranted = false;
       throw Exception(
         'Location permissions are permanently denied, we cannot request permissions.',
       );
     }
-
-    _locationPermissionGranted = _hasLocationPermission(permission);
 
     try {
       return await Geolocator.getCurrentPosition(
@@ -135,32 +125,33 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       distanceFilter: 20,
     );
 
-    _positionStreamSubscription = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen((position) async {
-      final currentUserPosition = _userPosition;
-      final hasMeaningfulChange =
-          currentUserPosition == null ||
-          Geolocator.distanceBetween(
-                currentUserPosition.latitude,
-                currentUserPosition.longitude,
-                position.latitude,
-                position.longitude,
-              ) >
-              20;
+    _positionStreamSubscription =
+        Geolocator.getPositionStream(locationSettings: locationSettings).listen(
+          (position) async {
+            final currentUserPosition = _userPosition;
+            final hasMeaningfulChange =
+                currentUserPosition == null ||
+                Geolocator.distanceBetween(
+                      currentUserPosition.latitude,
+                      currentUserPosition.longitude,
+                      position.latitude,
+                      position.longitude,
+                    ) >
+                    20;
 
-      if (!hasMeaningfulChange || !mounted) {
-        return;
-      }
+            if (!hasMeaningfulChange || !mounted) {
+              return;
+            }
 
-      setState(() {
-        _userPosition = position;
-      });
+            setState(() {
+              _userPosition = position;
+            });
 
-      await _loadCurrentLocationAddress(position);
-      await _loadBestRoute();
-      await _moveCameraToBounds();
-    });
+            await _loadCurrentLocationAddress(position);
+            await _loadBestRoute();
+            await _moveCameraToBounds();
+          },
+        );
   }
 
   Future<void> _loadCurrentLocationAddress(Position position) async {
@@ -247,7 +238,8 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       }
 
       final bestRoute = routes.first as Map<String, dynamic>;
-      final geometry = bestRoute['geometry'] as Map<String, dynamic>? ?? const {};
+      final geometry =
+          bestRoute['geometry'] as Map<String, dynamic>? ?? const {};
       final coordinates = geometry['coordinates'] as List<dynamic>? ?? const [];
 
       final points = coordinates
@@ -285,10 +277,11 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
         _usingFallbackRoute = true;
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _routeLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _routeLoading = false;
+        });
+      }
     }
   }
 
@@ -296,15 +289,15 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
     if (_userPosition == null) return;
 
     final clinic = latlng.LatLng(widget.clinicLatitude, widget.clinicLongitude);
-    final user = latlng.LatLng(_userPosition!.latitude, _userPosition!.longitude);
+    final user = latlng.LatLng(
+      _userPosition!.latitude,
+      _userPosition!.longitude,
+    );
     final latitudeDelta = (clinic.latitude - user.latitude).abs();
     final longitudeDelta = (clinic.longitude - user.longitude).abs();
 
     if (latitudeDelta < 0.0005 && longitudeDelta < 0.0005) {
-      _mapController.move(
-        latlng.LatLng(clinic.latitude, clinic.longitude),
-        17,
-      );
+      _mapController.move(latlng.LatLng(clinic.latitude, clinic.longitude), 17);
       return;
     }
 
@@ -321,16 +314,10 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
 
     try {
       _mapController.fitCamera(
-        CameraFit.bounds(
-          bounds: bounds,
-          padding: const EdgeInsets.all(48),
-        ),
+        CameraFit.bounds(bounds: bounds, padding: const EdgeInsets.all(48)),
       );
     } catch (_) {
-      _mapController.move(
-        latlng.LatLng(clinic.latitude, clinic.longitude),
-        14,
-      );
+      _mapController.move(latlng.LatLng(clinic.latitude, clinic.longitude), 14);
     }
   }
 
@@ -435,7 +422,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
         child: Container(
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: AppColors.surface.withOpacity(0.96),
+            color: AppColors.surface.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.border),
             boxShadow: const [
@@ -459,8 +446,8 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
                     label: _routeLoading
                         ? 'Refreshing route'
                         : _usingFallbackRoute
-                            ? 'Approx route'
-                            : 'OSRM route',
+                        ? 'Approx route'
+                        : 'OSRM route',
                     color: _usingFallbackRoute
                         ? AppColors.warning
                         : AppColors.primary,
@@ -568,9 +555,7 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
       ),
       body: Stack(
         children: [
-          Positioned.fill(
-            child: _buildMap(),
-          ),
+          Positioned.fill(child: _buildMap()),
           _buildRouteStatusCard(),
           _buildFloatingActions(),
           if (_loading)
@@ -632,7 +617,10 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
         decoration: BoxDecoration(
           color: Theme.of(context).scaffoldBackgroundColor,
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: 12),
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.08),
+              blurRadius: 12,
+            ),
           ],
         ),
         child: Column(
@@ -748,8 +736,8 @@ class _ClinicRouteScreenState extends State<ClinicRouteScreen> {
               _userPosition == null
                   ? 'Tap refresh to find your location'
                   : _durationLabel == null
-                      ? 'Distance: $_distanceLabel'
-                      : 'Best route: $_distanceLabel / $_durationLabel',
+                  ? 'Distance: $_distanceLabel'
+                  : 'Best route: $_distanceLabel / $_durationLabel',
               style: const TextStyle(fontWeight: FontWeight.w700),
             ),
           ],
@@ -775,7 +763,7 @@ class _InfoChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -785,10 +773,7 @@ class _InfoChip extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.w700,
-            ),
+            style: TextStyle(color: color, fontWeight: FontWeight.w700),
           ),
         ],
       ),

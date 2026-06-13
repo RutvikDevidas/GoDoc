@@ -23,4 +23,5 @@ class AppState {
 
   static List<String> patientNotifications = [];
   static List<String> doctorNotifications = [];
+  static List<String> adminNotifications = [];
 }

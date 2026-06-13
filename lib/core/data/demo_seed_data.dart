@@ -13,11 +13,8 @@ class DemoSeedData {
 
   static final DateTime _today = DateTime.now();
 
-  static DateTime get _baseDate => DateTime(
-    _today.year,
-    _today.month,
-    _today.day,
-  );
+  static DateTime get _baseDate =>
+      DateTime(_today.year, _today.month, _today.day);
 
   static final DoctorModel demoDoctor = DoctorModel(
     username: 'demo_doctor',

@@ -2,6 +2,18 @@
 
 GoDoc is a Flutter telemedicine app built for doctor and patient workflows. It supports appointment booking, doctor-managed video consultations, clinic location selection, feedback collection, and Firebase-backed data syncing.
 
+## The Team
+
+We are a team of six
+
+[![Rutvik](https://img.shields.io/badge/Github-RutvikDevidas-blue.svg)](https://github.com/RutvikDevidas)
+
+[![Amritha](https://img.shields.io/badge/Github-upparapalliamritha3--hash-blue.svg)](https://github.com/upparapalliamritha3-hash)
+
+- Saideep Dessai
+- Casintra Fernandes
+- Crysler Ferlon Sunny Afonso
+
 ## Features
 
 - Doctor and patient login/registration flows
